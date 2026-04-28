@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .db import init_db
+from .db import init_db, get_conn
 from .models import (
     get_all_companies, get_company, get_jobs_for_company,
     get_latest_cv, save_cv,
@@ -56,12 +56,26 @@ def _write_env(data: dict):
     ENV_PATH.write_text("\n".join(lines) + "\n")
 
 
+def _tr(request: Request, name: str, context: dict) -> HTMLResponse:
+    """Wrapper for TemplateResponse using the new Starlette 0.36+ signature."""
+    context["request"] = request
+    return templates.TemplateResponse(request=request, name=name, context=context)
+
+
 # ── Setup / first-launch ─────────────────────────────────────────────────────
 
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     env = _read_env()
-    return templates.TemplateResponse("setup.html", {"request": request, "env": env})
+    return _tr(request, "setup.html", {
+        "gemini_api_key": env.get("GEMINI_API_KEY", ""),
+        "smtp_host": env.get("SMTP_HOST", ""),
+        "smtp_port": env.get("SMTP_PORT", "587"),
+        "smtp_user": env.get("SMTP_USER", ""),
+        "smtp_pass": env.get("SMTP_PASS", ""),
+        "report_recipient": env.get("REPORT_RECIPIENT", ""),
+        "scrape_time": env.get("SCRAPE_TIME", "07:00"),
+    })
 
 
 @app.post("/setup")
@@ -106,8 +120,7 @@ async def companies_page(request: Request):
     if not is_setup_complete():
         return RedirectResponse("/setup")
     companies = get_all_companies()
-    return templates.TemplateResponse("companies.html", {
-        "request": request,
+    return _tr(request, "companies.html", {
         "companies": companies,
         "active_nav": "companies",
     })
@@ -123,8 +136,7 @@ async def company_detail(request: Request, company_id: int):
     jobs = get_jobs_for_company(company_id)
     scrape_log = get_scrape_log(company_id, limit=5)
     threshold = int(get_setting("match_threshold", "50"))
-    return templates.TemplateResponse("company_detail.html", {
-        "request": request,
+    return _tr(request, "company_detail.html", {
         "company": company,
         "jobs": jobs,
         "scrape_log": scrape_log,
@@ -139,8 +151,7 @@ async def company_detail(request: Request, company_id: int):
 async def cv_page(request: Request):
     cv = get_latest_cv()
     keywords = json.loads(cv["keywords_json"]) if cv else []
-    return templates.TemplateResponse("cv.html", {
-        "request": request,
+    return _tr(request, "cv.html", {
         "cv": cv,
         "keywords": keywords,
         "active_nav": "cv",
@@ -157,13 +168,10 @@ async def cv_upload(file: UploadFile = File(...)):
     else:
         raw_text = content.decode("utf-8", errors="replace")
 
-    # Keywords will be extracted by Gemini after upload; store raw for now
     save_cv(raw_text, [])
 
-    # Trigger async keyword extraction
     try:
         from .gemini import extract_cv_keywords
-        from .db import get_conn
         keywords = await extract_cv_keywords(raw_text)
         with get_conn() as conn:
             cv_row = conn.execute(
@@ -201,8 +209,7 @@ async def tracker_page(request: Request):
         "applied": sum(1 for j in jobs if j["decision"] == "applied"),
         "skipped": sum(1 for j in jobs if j["decision"] == "skipped"),
     }
-    return templates.TemplateResponse("tracker.html", {
-        "request": request,
+    return _tr(request, "tracker.html", {
         "jobs": jobs,
         "counts": counts,
         "active_nav": "tracker",
@@ -215,8 +222,7 @@ async def tracker_page(request: Request):
 async def report_page(request: Request):
     from .email_report import build_weekly_report_data
     data = build_weekly_report_data()
-    return templates.TemplateResponse("report.html", {
-        "request": request,
+    return _tr(request, "report.html", {
         "data": data,
         "active_nav": "report",
     })
@@ -237,17 +243,17 @@ async def report_send():
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     env = _read_env()
-    threshold = get_setting("match_threshold", "50")
-    scrape_time = get_setting("scrape_time", "07:00")
-    report_day = get_setting("report_day", "monday")
-    report_time = get_setting("report_time", "08:00")
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
-        "env": env,
-        "threshold": threshold,
-        "scrape_time": scrape_time,
-        "report_day": report_day,
-        "report_time": report_time,
+    return _tr(request, "settings.html", {
+        "gemini_api_key": env.get("GEMINI_API_KEY", ""),
+        "smtp_host": env.get("SMTP_HOST", ""),
+        "smtp_port": env.get("SMTP_PORT", "587"),
+        "smtp_user": env.get("SMTP_USER", ""),
+        "smtp_pass": env.get("SMTP_PASS", ""),
+        "report_recipient": env.get("REPORT_RECIPIENT", ""),
+        "threshold": get_setting("match_threshold", "50"),
+        "scrape_time": get_setting("scrape_time", "07:00"),
+        "report_day": get_setting("report_day", "monday"),
+        "report_time": get_setting("report_time", "08:00"),
         "active_nav": "settings",
     })
 

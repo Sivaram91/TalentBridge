@@ -21,7 +21,7 @@
       <div class="form-group">
         <label class="form-label">Gemini API Key</label>
         <input class="form-input" type="password" name="gemini_api_key"
-               value="{{ env.get('GEMINI_API_KEY','') }}" autocomplete="off"
+               value="{{ gemini_api_key }}" autocomplete="off"
                placeholder="AIza…">
         <div class="form-hint">Free tier at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a></div>
       </div>
@@ -45,29 +45,29 @@
         <div>
           <label class="form-label">SMTP Host</label>
           <input class="form-input" type="text" name="smtp_host"
-                 value="{{ env.get('SMTP_HOST','') }}" placeholder="smtp.gmail.com">
+                 value="{{ smtp_host }}" placeholder="smtp.gmail.com">
         </div>
         <div>
           <label class="form-label">Port</label>
           <input class="form-input" type="number" name="smtp_port"
-                 value="{{ env.get('SMTP_PORT','587') }}" placeholder="587">
+                 value="{{ smtp_port }}" placeholder="587">
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Sender Address</label>
         <input class="form-input" type="email" name="smtp_user"
-               value="{{ env.get('SMTP_USER','') }}" placeholder="you@gmail.com">
+               value="{{ smtp_user }}" placeholder="you@gmail.com">
       </div>
       <div class="form-group">
         <label class="form-label">App Password</label>
         <input class="form-input" type="password" name="smtp_pass"
-               value="{{ env.get('SMTP_PASS','') }}" autocomplete="off"
+               value="{{ smtp_pass }}" autocomplete="off"
                placeholder="App-specific password">
       </div>
       <div class="form-group">
         <label class="form-label">Report Recipient</label>
         <input class="form-input" type="email" name="report_recipient"
-               value="{{ env.get('REPORT_RECIPIENT','') }}" placeholder="you@email.com">
+               value="{{ report_recipient }}" placeholder="you@email.com">
       </div>
     </div>
 

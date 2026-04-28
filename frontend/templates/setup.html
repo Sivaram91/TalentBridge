@@ -81,7 +81,7 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
       <div class="form-group">
         <label class="form-label">API Key</label>
         <input class="form-input" type="password" name="gemini_api_key"
-               value="{{ env.get('GEMINI_API_KEY','') }}"
+               value="{{ gemini_api_key }}"
                placeholder="AIza…" autocomplete="off">
         <div class="form-hint">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></div>
       </div>
@@ -93,34 +93,34 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
       <div class="form-group">
         <label class="form-label">SMTP Host</label>
         <input class="form-input" type="text" name="smtp_host"
-               value="{{ env.get('SMTP_HOST','') }}"
+               value="{{ smtp_host }}"
                placeholder="smtp.gmail.com">
       </div>
       <div class="form-row form-group">
         <div>
           <label class="form-label">Sender Address</label>
           <input class="form-input" type="email" name="smtp_user"
-                 value="{{ env.get('SMTP_USER','') }}"
+                 value="{{ smtp_user }}"
                  placeholder="you@gmail.com">
         </div>
         <div>
           <label class="form-label">SMTP Port</label>
           <input class="form-input" type="number" name="smtp_port"
-                 value="{{ env.get('SMTP_PORT','587') }}"
+                 value="{{ smtp_port }}"
                  placeholder="587">
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">App Password</label>
         <input class="form-input" type="password" name="smtp_pass"
-               value="{{ env.get('SMTP_PASS','') }}"
+               value="{{ smtp_pass }}"
                placeholder="App password (not your login password)" autocomplete="off">
         <div class="form-hint">Use an <a href="https://myaccount.google.com/apppasswords" target="_blank">app-specific password</a> for Gmail.</div>
       </div>
       <div class="form-group">
         <label class="form-label">Report Recipient</label>
         <input class="form-input" type="email" name="report_recipient"
-               value="{{ env.get('REPORT_RECIPIENT','') }}"
+               value="{{ report_recipient }}"
                placeholder="recipient@email.com">
         <div class="form-hint">Weekly reports will be sent to this address.</div>
       </div>
@@ -132,7 +132,7 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
       <div class="form-group">
         <label class="form-label">Daily Scrape Time</label>
         <input class="form-input" type="time" name="scrape_time"
-               value="{{ env.get('SCRAPE_TIME','07:00') }}" style="max-width:160px">
+               value="{{ scrape_time }}" style="max-width:160px">
         <div class="form-hint">Companies will be scraped every day at this time.</div>
       </div>
 
