@@ -1,0 +1,9 @@
+.env
+data/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.spec.bak
+.playwright/

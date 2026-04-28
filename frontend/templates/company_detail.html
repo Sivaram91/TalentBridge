@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %} — {{ company.name }}{% endblock %}
+{% block breadcrumb %}{{ company.name }}{% endblock %}
+{% block topbar_status %}
+  {{ (jobs | selectattr('is_expired', 'equalto', 0) | list | length) }} active jobs
+{% endblock %}
+
+{% macro score_badge(score) %}
+  {% if score is not none %}
+    {% if score >= 70 %}
+      <span class="badge-score badge-green">{{ score }}%</span>
+    {% elif score >= 50 %}
+      <span class="badge-score badge-amber">{{ score }}%</span>
+    {% else %}
+      <span class="badge-score badge-muted">{{ score }}%</span>
+    {% endif %}
+  {% else %}
+    <span class="badge-score badge-muted">—</span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+{% set active_jobs = jobs | selectattr('is_expired', 'equalto', 0) | list %}
+{% set matched_jobs = active_jobs | selectattr('match_score', 'ge', threshold) | list %}
+{% set expired_jobs = jobs | selectattr('is_expired', 'equalto', 1) | list %}
+
+<div class="screen-content">
+  <div class="screen-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <a href="/companies" class="back-btn">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Companies
+      </a>
+      <span style="color:var(--border)">/</span>
+      <h1 class="screen-title" style="margin:0">{{ company.name }}</h1>
+    </div>
+    <a href="{{ company.url }}" target="_blank" rel="noreferrer" class="btn-outline">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+        <path d="M6 3H3a1 1 0 00-1 1v9a1 1 0 001 1h9a1 1 0 001-1v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M9 2h5v5M14 2L8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Visit Career Portal
+    </a>
+  </div>
+
+  <!-- Stats -->
+  <div style="display:flex;gap:20px;margin-bottom:20px">
+    {% for label, val, color in [
+      ('Active Jobs',       active_jobs | length,  'var(--blue)'),
+      ('Matched (≥'~threshold~'%)', matched_jobs | length, 'var(--green)'),
+      ('Expired',           expired_jobs | length, 'var(--muted-fg)')
+    ] %}
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 18px">
+      <div style="font-size:22px;font-weight:700;color:{{ color }};font-family:var(--mono)">{{ val }}</div>
+      <div style="font-size:12px;color:var(--muted-fg);margin-top:2px">{{ label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Filter tabs -->
+  <div class="filter-tabs">
+    <a href="?filter=all"      class="filter-tab {% if not request.query_params.get('filter') or request.query_params.get('filter')=='all' %}active{% endif %}">All <span class="tab-count">{{ jobs|length }}</span></a>
+    <a href="?filter=matched"  class="filter-tab {% if request.query_params.get('filter')=='matched' %}active{% endif %}">Matched <span class="tab-count">{{ matched_jobs|length }}</span></a>
+    <a href="?filter=unmatched" class="filter-tab {% if request.query_params.get('filter')=='unmatched' %}active{% endif %}">Unmatched <span class="tab-count">{{ active_jobs|length - matched_jobs|length }}</span></a>
+    <a href="?filter=expired"  class="filter-tab {% if request.query_params.get('filter')=='expired' %}active{% endif %}">Expired <span class="tab-count">{{ expired_jobs|length }}</span></a>
+  </div>
+
+  <!-- Job list -->
+  <div style="display:flex;flex-direction:column;gap:4px">
+    {% set f = request.query_params.get('filter', 'all') %}
+    {% for job in jobs | sort(attribute='is_expired') | sort(attribute='match_score', reverse=True) %}
+      {% set show = (
+        f == 'all' or
+        (f == 'matched'   and job.is_expired == 0 and (job.match_score or 0) >= threshold) or
+        (f == 'unmatched' and job.is_expired == 0 and (job.match_score or 0) < threshold) or
+        (f == 'expired'   and job.is_expired == 1)
+      ) %}
+      {% if show %}
+      <div class="job-row {% if job.is_expired %}job-expired{% endif %}" id="job-{{ job.id }}">
+        <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0">
+          {{ score_badge(job.match_score) }}
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap">
+              <span style="font-size:14px;font-weight:500;color:{% if job.is_expired %}var(--muted-fg){% else %}var(--fg){% endif %}">
+                {{ job.title }}
+              </span>
+              {% if job.is_expired %}
+                <span class="badge badge-muted">Expired</span>
+              {% else %}
+                <span class="badge badge-blue">Active</span>
+              {% endif %}
+              {% if job.decision %}
+                {% if job.decision == 'interested' %}
+                  <span class="badge badge-teal">Interested</span>
+                {% elif job.decision == 'applied' %}
+                  <span class="badge badge-green">Applied</span>
+                {% else %}
+                  <span class="badge badge-muted">Skipped</span>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if job.reasoning %}
+              <p style="font-size:12px;color:var(--muted-fg);margin:0;line-height:1.5">{{ job.reasoning }}</p>
+            {% endif %}
+            {% if job.decision == 'skipped' and job.decision_reason %}
+              <p style="font-size:11px;color:var(--muted-fg);margin:3px 0 0;font-style:italic">Reason: {{ job.decision_reason }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <!-- Decision inline editor -->
+          <div class="decision-view-{{ job.id }}">
+            <button onclick="openDecision({{ job.id }}, '{{ job.decision or '' }}', '{{ job.decision_reason or '' }}')"
+                    class="btn-ghost" style="font-size:11px">
+              {% if job.decision %}Override{% else %}Set decision{% endif %}
+            </button>
+          </div>
+
+          {% if job.url %}
+          <a href="{{ job.url }}" target="_blank" rel="noreferrer" class="btn-ghost" style="font-size:11px">
+            View Job ↗
+          </a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <!-- Scrape log -->
+  {% if scrape_log %}
+  <div style="margin-top:32px">
+    <div style="font-size:11px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">Recent Scrapes</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      {% for log in scrape_log %}
+      <div style="display:flex;align-items:center;gap:12px;padding:9px 14px;border-bottom:{% if not loop.last %}1px solid var(--border){% else %}none{% endif %}">
+        {% if log.status == 'success' %}
+          <span style="color:var(--green);font-size:12px">●</span>
+          <span class="badge badge-green" style="font-size:10px">Success</span>
+        {% elif log.status == 'pending' %}
+          <span style="color:var(--amber);font-size:12px">●</span>
+          <span class="badge badge-amber" style="font-size:10px">Pending</span>
+        {% elif log.status == 'rate_limited' %}
+          <span style="color:var(--amber);font-size:12px">●</span>
+          <span class="badge badge-amber" style="font-size:10px">Rate Limited</span>
+        {% else %}
+          <span style="color:var(--red);font-size:12px">●</span>
+          <span class="badge badge-red" style="font-size:10px">Failed</span>
+        {% endif %}
+        <span style="font-size:12px;color:var(--muted-fg);font-family:var(--mono)">{{ log.scraped_at }}</span>
+        <span style="font-size:12px;color:var(--muted-fg);margin-left:auto">{{ log.jobs_found }} jobs</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Decision modal -->
+<div id="decision-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;width:380px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.3)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:16px">Set Decision</div>
+    <input type="hidden" id="modal-job-id">
+
+    <div style="margin-bottom:14px">
+      <label class="form-label">Decision</label>
+      <select id="modal-decision" onchange="toggleReasonField()" class="form-input">
+        <option value="">No decision</option>
+        <option value="interested">Interested</option>
+        <option value="applied">Applied</option>
+        <option value="skipped">Skipped</option>
+      </select>
+    </div>
+
+    <div id="reason-group" style="display:none;margin-bottom:14px">
+      <label class="form-label">Reason for skipping</label>
+      <select id="modal-reason" class="form-input">
+        <option value="">Select reason…</option>
+        <option>Salary too low</option>
+        <option>Location mismatch</option>
+        <option>Not a good culture fit</option>
+        <option>Too senior</option>
+        <option>Too junior</option>
+        <option>Prefer remote</option>
+        <option>Stack mismatch</option>
+        <option>Other</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeDecision()" class="btn-outline">Cancel</button>
+      <button onclick="saveDecision()" class="btn">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function openDecision(jobId, currentDecision, currentReason) {
+  document.getElementById('modal-job-id').value = jobId;
+  document.getElementById('modal-decision').value = currentDecision;
+  document.getElementById('modal-reason').value = currentReason;
+  toggleReasonField();
+  const modal = document.getElementById('decision-modal');
+  modal.style.display = 'flex';
+}
+
+function closeDecision() {
+  document.getElementById('decision-modal').style.display = 'none';
+}
+
+function toggleReasonField() {
+  const dec = document.getElementById('modal-decision').value;
+  document.getElementById('reason-group').style.display = dec === 'skipped' ? '' : 'none';
+}
+
+async function saveDecision() {
+  const jobId = document.getElementById('modal-job-id').value;
+  const decision = document.getElementById('modal-decision').value;
+  const reason = document.getElementById('modal-reason').value;
+
+  const body = new FormData();
+  if (decision) body.append('decision', decision);
+  if (reason) body.append('reason', reason);
+
+  await fetch(`/api/decisions/${jobId}`, { method: 'POST', body });
+  closeDecision();
+  showToast('Decision saved.');
+  setTimeout(() => location.reload(), 800);
+}
+
+// Close modal on backdrop click
+document.getElementById('decision-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeDecision();
+});
+</script>
+{% endblock %}

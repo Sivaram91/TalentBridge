@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %} — Weekly Report{% endblock %}
+{% block breadcrumb %}Weekly Report{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">
+        Weekly Report
+        <span style="font-size:12px;font-weight:600;color:var(--green);background:var(--green-bg);padding:2px 8px;border-radius:99px;margin-left:10px;vertical-align:middle">current</span>
+      </h1>
+      <p class="screen-sub">{{ data.week_start }} – {{ data.week_end }}</p>
+    </div>
+    <button class="btn-outline" id="send-btn" onclick="sendReport()">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <path d="M2 8a6 6 0 1112 0A6 6 0 012 8z" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M8 5v4l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      Send Now
+    </button>
+  </div>
+
+  <div style="max-width:660px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <!-- Email header -->
+      <div style="background:var(--fg);padding:32px 36px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:8px">Weekly Digest</div>
+        <div style="font-size:22px;font-weight:700;color:white">TalentBridge Report</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.55);margin-top:4px">{{ data.week_start }} – {{ data.week_end }}</div>
+      </div>
+
+      <!-- Stats row -->
+      <div style="padding:28px 36px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;padding-bottom:24px;border-bottom:1px solid var(--border)">
+          {% for label, val, color in [
+            ('New Jobs',  data.new_jobs | length,     'var(--blue)'),
+            ('Matched',   data.matched_jobs | length,  'var(--green)'),
+            ('Applied',   data.applied_jobs | length,  'var(--teal)'),
+            ('Skipped',   data.skipped_jobs | length,  'var(--muted-fg)')
+          ] %}
+          <div style="text-align:center">
+            <div style="font-size:28px;font-weight:700;color:{{ color }};font-family:var(--mono)">{{ val }}</div>
+            <div style="font-size:11px;color:var(--muted-fg);margin-top:2px">{{ label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Sections -->
+        {% macro job_section(title, jobs, show_reason=false) %}
+          {% if jobs %}
+          <div style="margin-bottom:24px">
+            <div style="font-size:12px;font-weight:700;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">{{ title }}</div>
+            <div style="display:flex;flex-direction:column;gap:1px">
+              {% for job in jobs %}
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px"
+                   onmouseover="this.style.background='var(--surface-2)'"
+                   onmouseout="this.style.background='transparent'">
+                {% if job.match_score is not none %}
+                  {% if job.match_score >= 70 %}
+                    <span class="badge-score badge-green">{{ job.match_score }}%</span>
+                  {% elif job.match_score >= 50 %}
+                    <span class="badge-score badge-amber">{{ job.match_score }}%</span>
+                  {% else %}
+                    <span class="badge-score badge-muted">{{ job.match_score }}%</span>
+                  {% endif %}
+                {% endif %}
+                {% if job.url %}
+                  <a href="{{ job.url }}" target="_blank" style="flex:1;font-size:13px;font-weight:500;color:var(--accent);text-decoration:none">{{ job.title }}</a>
+                {% else %}
+                  <span style="flex:1;font-size:13px;font-weight:500;color:var(--fg)">{{ job.title }}</span>
+                {% endif %}
+                <span style="font-size:12px;color:var(--muted-fg)">{{ job.company_name }}</span>
+                {% if show_reason and job.decision_reason %}
+                  <span style="font-size:11px;color:var(--muted-fg);font-style:italic">{{ job.decision_reason }}</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        {% endmacro %}
+
+        {{ job_section("🆕 New Jobs This Week", data.new_jobs) }}
+        {{ job_section("⭐ Matched Jobs (≥50%)", data.matched_jobs) }}
+        {{ job_section("✅ Applied", data.applied_jobs) }}
+        {{ job_section("⏭ Skipped", data.skipped_jobs, show_reason=true) }}
+
+        {% if not data.new_jobs and not data.matched_jobs %}
+        <div style="text-align:center;padding:24px 0;color:var(--muted-fg);font-size:14px">
+          No activity this week yet. Check back after the next scrape.
+        </div>
+        {% endif %}
+      </div>
+
+      <div style="padding:16px 36px;background:var(--surface-2);border-top:1px solid var(--border);text-align:center;font-size:11px;color:var(--muted-fg)">
+        Generated by TalentBridge · Running locally on your machine
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function sendReport() {
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const resp = await fetch('/report/send', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      showToast('Report sent successfully!');
+    } else {
+      showToast('Send failed: ' + (data.error || 'unknown error'));
+    }
+  } catch(e) {
+    showToast('Send failed — check your email settings.');
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1112 0A6 6 0 012 8z" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v4l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> Send Now`;
+}
+</script>
+{% endblock %}

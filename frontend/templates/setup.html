@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TalentBridge — Setup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --fg: #18181a; --muted-fg: #7a7878; --surface: #ffffff; --surface-2: #f4f3f1;
+  --border: #e6e4df; --accent: oklch(52% 0.16 240); --accent-bg: oklch(96% 0.04 240);
+  --sans: 'DM Sans', system-ui, sans-serif; --mono: 'DM Mono', monospace;
+}
+html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color: var(--fg); -webkit-font-smoothing: antialiased; }
+.setup-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px;
+}
+.setup-box {
+  background: var(--surface); border-radius: 14px; width: 540px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+.setup-header {
+  background: #111318; padding: 28px 32px 24px;
+  display: flex; align-items: center; gap: 12px;
+}
+.logo-icon {
+  width: 34px; height: 34px; background: var(--accent); border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.setup-header-text h1 { font-size: 16px; font-weight: 700; color: #e8e6e1; }
+.setup-header-text p { font-size: 12px; color: #666872; margin-top: 2px; }
+.setup-body { padding: 28px 32px 32px; }
+.step-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 18px; display: flex; align-items: center; gap: 8px;
+}
+.step-label::after {
+  content: ''; flex: 1; height: 1px; background: var(--accent-bg);
+}
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted-fg); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px; }
+.form-input {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
+  font-size: 14px; font-family: var(--sans); color: var(--fg); background: var(--surface);
+  outline: none; transition: border-color 0.15s;
+}
+.form-input:focus { border-color: var(--accent); }
+.form-hint { font-size: 11px; color: var(--muted-fg); margin-top: 4px; }
+.form-hint a { color: var(--accent); }
+.form-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+.divider { height: 1px; background: var(--border); margin: 24px 0; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 20px; border: none; background: var(--accent); border-radius: 7px;
+  font-size: 14px; font-weight: 600; color: white; cursor: pointer;
+  transition: opacity 0.12s; font-family: var(--sans);
+}
+.btn:hover { opacity: 0.88; }
+</style>
+</head>
+<body>
+<div class="setup-wrap">
+  <div class="setup-box">
+    <div class="setup-header">
+      <div class="logo-icon">
+        <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+          <path d="M2 10L7 3l5 7H2z" fill="white" fill-opacity="0.9"/>
+        </svg>
+      </div>
+      <div class="setup-header-text">
+        <h1>Welcome to TalentBridge</h1>
+        <p>One-time setup — takes about 2 minutes</p>
+      </div>
+    </div>
+
+    <form class="setup-body" method="POST" action="/setup">
+      <!-- Step 1: Gemini API -->
+      <div class="step-label">1 · Gemini API Key</div>
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <input class="form-input" type="password" name="gemini_api_key"
+               value="{{ env.get('GEMINI_API_KEY','') }}"
+               placeholder="AIza…" autocomplete="off">
+        <div class="form-hint">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Step 2: Email config -->
+      <div class="step-label">2 · Email Configuration</div>
+      <div class="form-group">
+        <label class="form-label">SMTP Host</label>
+        <input class="form-input" type="text" name="smtp_host"
+               value="{{ env.get('SMTP_HOST','') }}"
+               placeholder="smtp.gmail.com">
+      </div>
+      <div class="form-row form-group">
+        <div>
+          <label class="form-label">Sender Address</label>
+          <input class="form-input" type="email" name="smtp_user"
+                 value="{{ env.get('SMTP_USER','') }}"
+                 placeholder="you@gmail.com">
+        </div>
+        <div>
+          <label class="form-label">SMTP Port</label>
+          <input class="form-input" type="number" name="smtp_port"
+                 value="{{ env.get('SMTP_PORT','587') }}"
+                 placeholder="587">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">App Password</label>
+        <input class="form-input" type="password" name="smtp_pass"
+               value="{{ env.get('SMTP_PASS','') }}"
+               placeholder="App password (not your login password)" autocomplete="off">
+        <div class="form-hint">Use an <a href="https://myaccount.google.com/apppasswords" target="_blank">app-specific password</a> for Gmail.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Report Recipient</label>
+        <input class="form-input" type="email" name="report_recipient"
+               value="{{ env.get('REPORT_RECIPIENT','') }}"
+               placeholder="recipient@email.com">
+        <div class="form-hint">Weekly reports will be sent to this address.</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Step 3: Scrape time -->
+      <div class="step-label">3 · Schedule</div>
+      <div class="form-group">
+        <label class="form-label">Daily Scrape Time</label>
+        <input class="form-input" type="time" name="scrape_time"
+               value="{{ env.get('SCRAPE_TIME','07:00') }}" style="max-width:160px">
+        <div class="form-hint">Companies will be scraped every day at this time.</div>
+      </div>
+
+      <div style="margin-top:28px">
+        <button class="btn" type="submit">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M3 8l4 4 6-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Save & Open Dashboard
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+</body>
+</html>

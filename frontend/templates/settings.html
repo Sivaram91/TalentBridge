@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %} — Settings{% endblock %}
+{% block breadcrumb %}Settings{% endblock %}
+
+{% block content %}
+<div class="screen-content" style="max-width:600px">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">Settings</h1>
+      <p class="screen-sub">API keys, email configuration, and schedule preferences.</p>
+    </div>
+  </div>
+
+  <form method="POST" action="/settings">
+    <!-- Gemini -->
+    <div style="margin-bottom:32px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        AI
+        <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gemini API Key</label>
+        <input class="form-input" type="password" name="gemini_api_key"
+               value="{{ env.get('GEMINI_API_KEY','') }}" autocomplete="off"
+               placeholder="AIza…">
+        <div class="form-hint">Free tier at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Match Threshold (%)</label>
+        <div style="display:flex;align-items:center;gap:12px">
+          <input class="form-input" type="number" name="match_threshold" min="0" max="100"
+                 value="{{ threshold }}" style="max-width:100px">
+          <span style="font-size:13px;color:var(--muted-fg)">Jobs scoring above this are considered "matched"</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Email -->
+    <div style="margin-bottom:32px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        Email
+        <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 120px;gap:10px" class="form-group">
+        <div>
+          <label class="form-label">SMTP Host</label>
+          <input class="form-input" type="text" name="smtp_host"
+                 value="{{ env.get('SMTP_HOST','') }}" placeholder="smtp.gmail.com">
+        </div>
+        <div>
+          <label class="form-label">Port</label>
+          <input class="form-input" type="number" name="smtp_port"
+                 value="{{ env.get('SMTP_PORT','587') }}" placeholder="587">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sender Address</label>
+        <input class="form-input" type="email" name="smtp_user"
+               value="{{ env.get('SMTP_USER','') }}" placeholder="you@gmail.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">App Password</label>
+        <input class="form-input" type="password" name="smtp_pass"
+               value="{{ env.get('SMTP_PASS','') }}" autocomplete="off"
+               placeholder="App-specific password">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Report Recipient</label>
+        <input class="form-input" type="email" name="report_recipient"
+               value="{{ env.get('REPORT_RECIPIENT','') }}" placeholder="you@email.com">
+      </div>
+    </div>
+
+    <!-- Schedule -->
+    <div style="margin-bottom:32px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        Schedule
+        <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" class="form-group">
+        <div>
+          <label class="form-label">Daily Scrape Time</label>
+          <input class="form-input" type="time" name="scrape_time" value="{{ scrape_time }}">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" class="form-group">
+        <div>
+          <label class="form-label">Weekly Report Day</label>
+          <select class="form-input" name="report_day">
+            {% for d in ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] %}
+            <option value="{{ d }}" {% if report_day == d %}selected{% endif %}>{{ d | capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Report Time</label>
+          <input class="form-input" type="time" name="report_time" value="{{ report_time }}">
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn">Save Settings</button>
+  </form>
+</div>
+{% endblock %}

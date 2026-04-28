@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %} — CV Manager{% endblock %}
+{% block breadcrumb %}CV Manager{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">CV Manager</h1>
+      <p class="screen-sub">Your CV is used to compute match scores for all job listings.</p>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:860px">
+    <!-- Left: current CV + upload -->
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">Current CV</div>
+      <div class="card">
+        {% if cv %}
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <div style="width:40px;height:48px;background:var(--accent-bg);border-radius:6px;display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="20" viewBox="0 0 18 20" fill="none">
+              <rect x="1" y="1" width="12" height="18" rx="2" stroke="var(--accent)" stroke-width="1.5"/>
+              <path d="M4 6h6M4 9h6M4 12h4" stroke="var(--accent)" stroke-width="1.3" stroke-linecap="round"/>
+              <path d="M13 1l4 4" stroke="var(--accent)" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--fg)" id="cv-filename">CV uploaded</div>
+            <div style="font-size:11px;color:var(--muted-fg);margin-top:2px;font-family:var(--mono)" id="cv-date">
+              Last updated {{ cv.uploaded_at[:10] }}
+            </div>
+          </div>
+          <span id="cv-updated-tick" style="display:none;margin-left:auto;font-size:11px;color:var(--green);font-weight:600">✓ Updated</span>
+        </div>
+        {% else %}
+        <div style="margin-bottom:16px;padding:12px;background:var(--surface-2);border-radius:6px;font-size:13px;color:var(--muted-fg)">
+          No CV uploaded yet. Upload one below to start matching.
+        </div>
+        {% endif %}
+
+        <!-- Drop zone -->
+        <div class="upload-zone" id="drop-zone" onclick="document.getElementById('cv-file').click()">
+          <input type="file" id="cv-file" accept=".pdf,.txt,.docx" style="display:none" onchange="handleFileSelect(this)">
+          <div id="upload-idle">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="margin-bottom:8px;opacity:0.5">
+              <path d="M10 13V5M7 8l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <div style="font-size:13px;color:var(--muted-fg)">Drop PDF / TXT here, or <span style="color:var(--accent);cursor:pointer">browse</span></div>
+            <div style="font-size:11px;color:var(--muted-fg);margin-top:4px">{% if cv %}Replaces current CV{% else %}PDF, TXT, or DOCX{% endif %}</div>
+          </div>
+          <div id="upload-processing" style="display:none;color:var(--accent);font-size:13px">Processing CV…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: keywords -->
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
+        Extracted Keywords
+        <span style="font-size:10px;font-weight:400" id="kw-count">({{ keywords | length }})</span>
+      </div>
+      <div class="card" style="min-height:200px">
+        <div id="keywords-wrap" style="display:flex;flex-wrap:wrap;gap:6px">
+          {% if keywords %}
+            {% for kw in keywords %}
+            <span style="padding:4px 10px;border-radius:99px;font-size:12px;font-weight:500;
+                         background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">{{ kw }}</span>
+            {% endfor %}
+          {% else %}
+            <div style="color:var(--muted-fg);font-size:13px">Keywords will appear here after CV upload.</div>
+          {% endif %}
+        </div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">
+          Keywords are extracted automatically and used to score all job listings. Re-upload your CV to refresh.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const dropZone = document.getElementById('drop-zone');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragging'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragging');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+});
+
+function handleFileSelect(input) {
+  if (input.files[0]) uploadFile(input.files[0]);
+}
+
+async function uploadFile(file) {
+  document.getElementById('upload-idle').style.display = 'none';
+  document.getElementById('upload-processing').style.display = '';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/cv/upload', { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    // Update keywords display
+    const wrap = document.getElementById('keywords-wrap');
+    wrap.innerHTML = '';
+    if (data.keywords && data.keywords.length) {
+      data.keywords.forEach(kw => {
+        const span = document.createElement('span');
+        span.style.cssText = 'padding:4px 10px;border-radius:99px;font-size:12px;font-weight:500;background:var(--accent-bg);color:var(--accent);font-family:var(--mono)';
+        span.textContent = kw;
+        wrap.appendChild(span);
+      });
+      document.getElementById('kw-count').textContent = `(${data.keywords.length})`;
+    } else {
+      wrap.innerHTML = '<div style="color:var(--muted-fg);font-size:13px">No keywords extracted yet — matching will run on next scrape.</div>';
+    }
+
+    document.getElementById('cv-filename').textContent = file.name;
+    document.getElementById('cv-date').textContent = 'Last updated ' + new Date().toISOString().slice(0,10);
+    document.getElementById('cv-updated-tick').style.display = '';
+    setTimeout(() => document.getElementById('cv-updated-tick').style.display = 'none', 2500);
+    showToast('CV uploaded successfully.');
+  } catch(e) {
+    showToast('Upload failed — please try again.');
+  }
+
+  document.getElementById('upload-idle').style.display = '';
+  document.getElementById('upload-processing').style.display = 'none';
+}
+</script>
+{% endblock %}

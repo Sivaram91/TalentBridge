@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %} — Companies{% endblock %}
+{% block breadcrumb %}Company Overview{% endblock %}
+{% block topbar_status %}
+  {{ companies | selectattr('scrape_status', 'equalto', 'success') | list | length }}/{{ companies | length }} scraped
+{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">Companies</h1>
+      <p class="screen-sub">
+        {{ companies | length }} companies ·
+        {{ companies | sum(attribute='active_job_count') }} active jobs ·
+        {{ companies | sum(attribute='matched_job_count') }} matched
+      </p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn-outline" onclick="triggerScrape()" id="scrape-btn">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <path d="M13 8A5 5 0 112.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M2 2v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Scrape Now
+      </button>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div style="display:flex;gap:10px;margin-bottom:20px;align-items:center">
+    <div style="position:relative;flex:1;max-width:320px">
+      <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:0.4" width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <input id="search" value="" oninput="filterCards()" placeholder="Search companies…"
+        style="width:100%;padding-left:32px;padding-right:12px;height:34px;border:1px solid var(--border);
+               border-radius:6px;font-size:13px;background:var(--surface);color:var(--fg);outline:none">
+    </div>
+    <select id="status-filter" onchange="filterCards()"
+      style="height:34px;border:1px solid var(--border);border-radius:6px;font-size:13px;
+             background:var(--surface);color:var(--fg);padding:0 10px;cursor:pointer">
+      <option value="all">All statuses</option>
+      <option value="success">Success</option>
+      <option value="pending">Pending</option>
+      <option value="failed">Failed</option>
+    </select>
+    <span id="shown-count" style="font-size:12px;color:var(--muted-fg);margin-left:4px">
+      {{ companies | length }} shown
+    </span>
+  </div>
+
+  <!-- Grid -->
+  <div class="company-grid" id="company-grid">
+    {% for c in companies %}
+    <a href="/companies/{{ c.id }}"
+       class="company-card"
+       data-name="{{ c.name | lower }}"
+       data-status="{{ c.scrape_status or 'pending' }}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="company-logo">{{ c.name[:2] | upper }}</div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--fg);line-height:1.3">{{ c.name }}</div>
+            <div style="font-size:11px;color:var(--muted-fg);margin-top:1px">{{ c.url | replace('https://','') | replace('http://','') | truncate(30, true, '') }}</div>
+          </div>
+        </div>
+        {% set st = c.scrape_status or 'pending' %}
+        {% if st == 'success' %}
+          <span class="badge badge-green">Success</span>
+        {% elif st == 'pending' %}
+          <span class="badge badge-amber">Pending</span>
+        {% else %}
+          <span class="badge badge-red">Failed</span>
+        {% endif %}
+      </div>
+      <div style="display:flex;gap:16px;margin-top:8px">
+        <div class="card-stat">
+          <span class="card-stat-val">{{ c.active_job_count or 0 }}</span>
+          <span class="card-stat-label">active</span>
+        </div>
+        <div class="card-stat">
+          <span class="card-stat-val" style="color:{% if (c.matched_job_count or 0) > 0 %}var(--green){% else %}var(--muted-fg){% endif %}">
+            {{ c.matched_job_count or 0 }}
+          </span>
+          <span class="card-stat-label">matched</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        {% if st == 'success' %}
+          <span style="color:var(--green);font-size:13px">●</span>
+        {% elif st == 'pending' %}
+          <span style="color:var(--amber);font-size:13px">●</span>
+        {% else %}
+          <span style="color:var(--red);font-size:13px">●</span>
+        {% endif %}
+        <span style="font-size:11px;color:var(--muted-fg);font-family:var(--mono)">
+          {% if c.last_scraped %}
+            {{ c.last_scraped | replace('T',' ') | truncate(16, true, '') }}
+          {% else %}
+            Never scraped
+          {% endif %}
+        </span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div id="empty-state" style="display:none;text-align:center;padding:60px 0;color:var(--muted-fg);font-size:14px">
+    No companies match your search.
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function filterCards() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const st = document.getElementById('status-filter').value;
+  const cards = document.querySelectorAll('.company-card');
+  let shown = 0;
+  cards.forEach(card => {
+    const nameMatch = card.dataset.name.includes(q);
+    const statusMatch = st === 'all' || card.dataset.status === st;
+    const visible = nameMatch && statusMatch;
+    card.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  document.getElementById('shown-count').textContent = shown + ' shown';
+  document.getElementById('empty-state').style.display = shown === 0 ? '' : 'none';
+}
+
+async function triggerScrape() {
+  const btn = document.getElementById('scrape-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  try {
+    await fetch('/api/scrape/now', { method: 'POST' });
+    showToast('Scrape started — check back in a few minutes.');
+  } catch(e) {
+    showToast('Failed to start scrape.');
+  }
+  setTimeout(() => { btn.disabled = false; btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13 8A5 5 0 112.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2 2v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Scrape Now`; }, 3000);
+}
+</script>
+{% endblock %}

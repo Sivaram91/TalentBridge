@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %} — Application Tracker{% endblock %}
+{% block breadcrumb %}Application Tracker{% endblock %}
+{% block topbar_status %}{{ counts.applied }} applied · {{ counts.interested }} interested{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">Application Tracker</h1>
+      <p class="screen-sub">{{ counts.applied }} applied · {{ counts.interested }} interested · {{ counts.skipped }} skipped</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--muted-fg)">Sort by</span>
+      <select id="sort-select" onchange="sortTable()"
+        style="font-size:12px;border:1px solid var(--border);border-radius:6px;padding:5px 10px;background:var(--surface);color:var(--fg);cursor:pointer">
+        <option value="score">Match score</option>
+        <option value="company">Company</option>
+        <option value="date">Date decided</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Filter tabs -->
+  <div class="filter-tabs">
+    <a href="?filter=all"        class="filter-tab {% if not request.query_params.get('filter') or request.query_params.get('filter')=='all' %}active{% endif %}">
+      All <span class="tab-count">{{ counts.all }}</span>
+    </a>
+    <a href="?filter=interested" class="filter-tab {% if request.query_params.get('filter')=='interested' %}active{% endif %}">
+      Interested <span class="tab-count">{{ counts.interested }}</span>
+    </a>
+    <a href="?filter=applied"    class="filter-tab {% if request.query_params.get('filter')=='applied' %}active{% endif %}">
+      Applied <span class="tab-count">{{ counts.applied }}</span>
+    </a>
+    <a href="?filter=skipped"    class="filter-tab {% if request.query_params.get('filter')=='skipped' %}active{% endif %}">
+      Skipped <span class="tab-count">{{ counts.skipped }}</span>
+    </a>
+  </div>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+    {% set f = request.query_params.get('filter', 'all') %}
+    {% set visible = jobs if f == 'all' else jobs | selectattr('decision', 'equalto', f) | list %}
+    {% if visible %}
+    <table class="data-table" id="tracker-table">
+      <thead>
+        <tr>
+          <th>Job Title</th>
+          <th>Company</th>
+          <th>Score</th>
+          <th>Decision</th>
+          <th>Reason</th>
+          <th>Decided</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in visible %}
+        <tr data-score="{{ job.match_score or 0 }}" data-company="{{ job.company_name }}" data-date="{{ job.decided_at or '' }}">
+          <td style="font-weight:500">
+            {% if job.url %}
+              <a href="{{ job.url }}" target="_blank" rel="noreferrer" class="table-link">{{ job.title }}</a>
+            {% else %}
+              {{ job.title }}
+            {% endif %}
+          </td>
+          <td style="color:var(--muted-fg)">
+            <a href="/companies/{{ job.company_id }}" class="table-link">{{ job.company_name }}</a>
+          </td>
+          <td>
+            {% if job.match_score is not none %}
+              {% if job.match_score >= 70 %}
+                <span class="badge-score badge-green">{{ job.match_score }}%</span>
+              {% elif job.match_score >= 50 %}
+                <span class="badge-score badge-amber">{{ job.match_score }}%</span>
+              {% else %}
+                <span class="badge-score badge-muted">{{ job.match_score }}%</span>
+              {% endif %}
+            {% else %}
+              <span class="badge-score badge-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if job.decision == 'interested' %}
+              <span class="badge badge-teal">Interested</span>
+            {% elif job.decision == 'applied' %}
+              <span class="badge badge-green">Applied</span>
+            {% else %}
+              <span class="badge badge-muted">Skipped</span>
+            {% endif %}
+          </td>
+          <td style="color:var(--muted-fg);font-size:12px;font-style:{% if not job.decision_reason %}italic{% endif %}">
+            {{ job.decision_reason or ('—' if job.decision != 'skipped' else 'No reason') }}
+          </td>
+          <td style="color:var(--muted-fg);font-size:11px;font-family:var(--mono);white-space:nowrap">
+            {{ (job.decided_at or '')[:10] }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:40px;text-align:center;color:var(--muted-fg);font-size:14px">
+      No jobs in this category.
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function sortTable() {
+  const by = document.getElementById('sort-select').value;
+  const tbody = document.querySelector('#tracker-table tbody');
+  if (!tbody) return;
+  const rows = [...tbody.querySelectorAll('tr')];
+  rows.sort((a, b) => {
+    if (by === 'score') return Number(b.dataset.score) - Number(a.dataset.score);
+    if (by === 'company') return a.dataset.company.localeCompare(b.dataset.company);
+    if (by === 'date') return b.dataset.date.localeCompare(a.dataset.date);
+    return 0;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+</script>
+{% endblock %}
