@@ -7,12 +7,13 @@
   <div class="screen-header">
     <div>
       <h1 class="screen-title">Settings</h1>
-      <p class="screen-sub">API keys, email configuration, and schedule preferences.</p>
+      <p class="screen-sub">API key, report recipient, and schedule preferences.</p>
     </div>
   </div>
 
   <form method="POST" action="/settings">
-    <!-- Gemini -->
+
+    <!-- AI -->
     <div style="margin-bottom:32px">
       <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
         AI
@@ -35,39 +36,17 @@
       </div>
     </div>
 
-    <!-- Email -->
+    <!-- Reports -->
     <div style="margin-bottom:32px">
       <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
-        Email
+        Reports
         <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 120px;gap:10px" class="form-group">
-        <div>
-          <label class="form-label">SMTP Host</label>
-          <input class="form-input" type="text" name="smtp_host"
-                 value="{{ smtp_host }}" placeholder="smtp.gmail.com">
-        </div>
-        <div>
-          <label class="form-label">Port</label>
-          <input class="form-input" type="number" name="smtp_port"
-                 value="{{ smtp_port }}" placeholder="587">
-        </div>
-      </div>
       <div class="form-group">
-        <label class="form-label">Sender Address</label>
-        <input class="form-input" type="email" name="smtp_user"
-               value="{{ smtp_user }}" placeholder="you@gmail.com">
-      </div>
-      <div class="form-group">
-        <label class="form-label">App Password</label>
-        <input class="form-input" type="password" name="smtp_pass"
-               value="{{ smtp_pass }}" autocomplete="off"
-               placeholder="App-specific password">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Report Recipient</label>
+        <label class="form-label">Your Email Address</label>
         <input class="form-input" type="email" name="report_recipient"
                value="{{ report_recipient }}" placeholder="you@email.com">
+        <div class="form-hint">Daily match alerts and weekly reports are sent to this address.</div>
       </div>
     </div>
 

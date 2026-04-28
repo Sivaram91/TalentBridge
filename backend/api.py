@@ -69,10 +69,6 @@ async def setup_page(request: Request):
     env = _read_env()
     return _tr(request, "setup.html", {
         "gemini_api_key": env.get("GEMINI_API_KEY", ""),
-        "smtp_host": env.get("SMTP_HOST", ""),
-        "smtp_port": env.get("SMTP_PORT", "587"),
-        "smtp_user": env.get("SMTP_USER", ""),
-        "smtp_pass": env.get("SMTP_PASS", ""),
         "report_recipient": env.get("REPORT_RECIPIENT", ""),
         "scrape_time": env.get("SCRAPE_TIME", "07:00"),
     })
@@ -82,20 +78,12 @@ async def setup_page(request: Request):
 async def setup_save(
     request: Request,
     gemini_api_key: str = Form(""),
-    smtp_host: str = Form(""),
-    smtp_port: str = Form("587"),
-    smtp_user: str = Form(""),
-    smtp_pass: str = Form(""),
     report_recipient: str = Form(""),
     scrape_time: str = Form("07:00"),
 ):
     env = _read_env()
     env.update({
         "GEMINI_API_KEY": gemini_api_key,
-        "SMTP_HOST": smtp_host,
-        "SMTP_PORT": smtp_port,
-        "SMTP_USER": smtp_user,
-        "SMTP_PASS": smtp_pass,
         "REPORT_RECIPIENT": report_recipient,
         "SCRAPE_TIME": scrape_time,
     })
@@ -245,10 +233,6 @@ async def settings_page(request: Request):
     env = _read_env()
     return _tr(request, "settings.html", {
         "gemini_api_key": env.get("GEMINI_API_KEY", ""),
-        "smtp_host": env.get("SMTP_HOST", ""),
-        "smtp_port": env.get("SMTP_PORT", "587"),
-        "smtp_user": env.get("SMTP_USER", ""),
-        "smtp_pass": env.get("SMTP_PASS", ""),
         "report_recipient": env.get("REPORT_RECIPIENT", ""),
         "threshold": get_setting("match_threshold", "50"),
         "scrape_time": get_setting("scrape_time", "07:00"),
@@ -261,10 +245,6 @@ async def settings_page(request: Request):
 @app.post("/settings")
 async def settings_save(
     gemini_api_key: str = Form(""),
-    smtp_host: str = Form(""),
-    smtp_port: str = Form("587"),
-    smtp_user: str = Form(""),
-    smtp_pass: str = Form(""),
     report_recipient: str = Form(""),
     scrape_time: str = Form("07:00"),
     report_day: str = Form("monday"),
@@ -274,10 +254,6 @@ async def settings_save(
     env = _read_env()
     env.update({
         "GEMINI_API_KEY": gemini_api_key,
-        "SMTP_HOST": smtp_host,
-        "SMTP_PORT": smtp_port,
-        "SMTP_USER": smtp_user,
-        "SMTP_PASS": smtp_pass,
         "REPORT_RECIPIENT": report_recipient,
     })
     _write_env(env)

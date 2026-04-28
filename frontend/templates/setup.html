@@ -36,9 +36,7 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
   font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--accent); margin-bottom: 18px; display: flex; align-items: center; gap: 8px;
 }
-.step-label::after {
-  content: ''; flex: 1; height: 1px; background: var(--accent-bg);
-}
+.step-label::after { content: ''; flex: 1; height: 1px; background: var(--accent-bg); }
 .form-group { margin-bottom: 16px; }
 .form-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted-fg); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px; }
 .form-input {
@@ -49,7 +47,6 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
 .form-input:focus { border-color: var(--accent); }
 .form-hint { font-size: 11px; color: var(--muted-fg); margin-top: 4px; }
 .form-hint a { color: var(--accent); }
-.form-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
 .divider { height: 1px; background: var(--border); margin: 24px 0; }
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -71,11 +68,12 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
       </div>
       <div class="setup-header-text">
         <h1>Welcome to TalentBridge</h1>
-        <p>One-time setup — takes about 2 minutes</p>
+        <p>One-time setup — takes about a minute</p>
       </div>
     </div>
 
     <form class="setup-body" method="POST" action="/setup">
+
       <!-- Step 1: Gemini API -->
       <div class="step-label">1 · Gemini API Key</div>
       <div class="form-group">
@@ -88,41 +86,14 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
 
       <div class="divider"></div>
 
-      <!-- Step 2: Email config -->
-      <div class="step-label">2 · Email Configuration</div>
+      <!-- Step 2: Report recipient -->
+      <div class="step-label">2 · Your Email Address</div>
       <div class="form-group">
-        <label class="form-label">SMTP Host</label>
-        <input class="form-input" type="text" name="smtp_host"
-               value="{{ smtp_host }}"
-               placeholder="smtp.gmail.com">
-      </div>
-      <div class="form-row form-group">
-        <div>
-          <label class="form-label">Sender Address</label>
-          <input class="form-input" type="email" name="smtp_user"
-                 value="{{ smtp_user }}"
-                 placeholder="you@gmail.com">
-        </div>
-        <div>
-          <label class="form-label">SMTP Port</label>
-          <input class="form-input" type="number" name="smtp_port"
-                 value="{{ smtp_port }}"
-                 placeholder="587">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">App Password</label>
-        <input class="form-input" type="password" name="smtp_pass"
-               value="{{ smtp_pass }}"
-               placeholder="App password (not your login password)" autocomplete="off">
-        <div class="form-hint">Use an <a href="https://myaccount.google.com/apppasswords" target="_blank">app-specific password</a> for Gmail.</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Report Recipient</label>
+        <label class="form-label">Recipient Email</label>
         <input class="form-input" type="email" name="report_recipient"
                value="{{ report_recipient }}"
-               placeholder="recipient@email.com">
-        <div class="form-hint">Weekly reports will be sent to this address.</div>
+               placeholder="you@email.com">
+        <div class="form-hint">Daily match alerts and weekly reports will be sent here.</div>
       </div>
 
       <div class="divider"></div>
@@ -141,7 +112,7 @@ html, body { height: 100%; font-family: var(--sans); background: #0e0f13; color:
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
             <path d="M3 8l4 4 6-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          Save & Open Dashboard
+          Save &amp; Open Dashboard
         </button>
       </div>
     </form>

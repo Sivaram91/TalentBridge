@@ -21,16 +21,28 @@ def _read_env() -> dict:
     return env
 
 
+def _read_smtp_config() -> dict:
+    """Read sender SMTP config from smtp_config.json (operator-level setting)."""
+    import json
+    smtp_path = Path(__file__).parent.parent / "smtp_config.json"
+    if smtp_path.exists():
+        data = json.loads(smtp_path.read_text())
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    return {}
+
+
 def _send_email(subject: str, html_body: str):
     env = _read_env()
-    host = env.get("SMTP_HOST", "")
-    port = int(env.get("SMTP_PORT", "587"))
-    user = env.get("SMTP_USER", "")
-    password = env.get("SMTP_PASS", "")
+    smtp = _read_smtp_config()
+
+    host = smtp.get("SMTP_HOST", "")
+    port = int(smtp.get("SMTP_PORT", "587"))
+    user = smtp.get("SMTP_USER", "")
+    password = smtp.get("SMTP_PASS", "")
     recipient = env.get("REPORT_RECIPIENT", "")
 
     if not all([host, user, password, recipient]):
-        raise ValueError("Email not configured — check Settings")
+        raise ValueError("Email not fully configured — check smtp_config.json and recipient email in Settings")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject

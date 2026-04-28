@@ -1,4 +1,5 @@
 .env
+smtp_config.json
 data/
 __pycache__/
 *.pyc
