@@ -1,5 +1,7 @@
 """Entry point — starts FastAPI + APScheduler + pystray."""
 import threading
+import time
+import webbrowser
 import uvicorn
 from .db import init_db
 from .models import ensure_settings_table
@@ -14,6 +16,12 @@ def run_server():
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 
+def _open_browser():
+    # Give uvicorn a moment to bind before opening the browser
+    time.sleep(1.2)
+    webbrowser.open(f"http://localhost:{PORT}")
+
+
 def main():
     init_db()
     ensure_settings_table()
@@ -22,13 +30,15 @@ def main():
     # Start scheduler in background thread
     start_scheduler()
 
-    # Start pystray in background thread (imports deferred — optional dependency)
+    # Open browser automatically
+    threading.Thread(target=_open_browser, daemon=True).start()
+
+    # Start pystray in background thread (optional — skipped in headless environments)
     try:
         from .tray import run_tray
-        tray_thread = threading.Thread(target=run_tray, daemon=True)
-        tray_thread.start()
+        threading.Thread(target=run_tray, daemon=True).start()
     except Exception:
-        pass  # tray is optional; headless environments skip it
+        pass
 
     # FastAPI blocks the main thread
     run_server()

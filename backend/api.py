@@ -1,6 +1,5 @@
 """FastAPI application — routes for UI and REST endpoints."""
 import json
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -9,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .db import init_db, get_conn
+from .db import get_conn
 from .models import (
     get_all_companies, get_company, get_jobs_for_company,
     get_latest_cv, save_cv,
@@ -18,7 +17,6 @@ from .models import (
     get_setting, set_setting, ensure_settings_table,
     get_scrape_log,
 )
-from .config import PARTNERS_PATH, load_partners
 
 BASE_DIR = Path(__file__).parent.parent
 TEMPLATES_DIR = BASE_DIR / "frontend" / "templates"
@@ -32,13 +30,6 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-def is_setup_complete() -> bool:
-    if not ENV_PATH.exists():
-        return False
-    env = _read_env()
-    return bool(env.get("GEMINI_API_KEY")) and bool(env.get("SMTP_HOST"))
-
 
 def _read_env() -> dict:
     env = {}
@@ -57,47 +48,15 @@ def _write_env(data: dict):
 
 
 def _tr(request: Request, name: str, context: dict) -> HTMLResponse:
-    """Wrapper for TemplateResponse using the new Starlette 0.36+ signature."""
+    """TemplateResponse wrapper — Starlette 0.36+ keyword-arg signature."""
     context["request"] = request
     return templates.TemplateResponse(request=request, name=name, context=context)
 
 
-# ── Setup / first-launch ─────────────────────────────────────────────────────
-
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request):
-    env = _read_env()
-    return _tr(request, "setup.html", {
-        "gemini_api_key": env.get("GEMINI_API_KEY", ""),
-        "report_recipient": env.get("REPORT_RECIPIENT", ""),
-        "scrape_time": env.get("SCRAPE_TIME", "07:00"),
-    })
-
-
-@app.post("/setup")
-async def setup_save(
-    request: Request,
-    gemini_api_key: str = Form(""),
-    report_recipient: str = Form(""),
-    scrape_time: str = Form("07:00"),
-):
-    env = _read_env()
-    env.update({
-        "GEMINI_API_KEY": gemini_api_key,
-        "REPORT_RECIPIENT": report_recipient,
-        "SCRAPE_TIME": scrape_time,
-    })
-    _write_env(env)
-    set_setting("scrape_time", scrape_time)
-    return RedirectResponse("/", status_code=303)
-
-
-# ── Root redirect ─────────────────────────────────────────────────────────────
+# ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    if not is_setup_complete():
-        return RedirectResponse("/setup")
+async def root():
     return RedirectResponse("/companies")
 
 
@@ -105,8 +64,6 @@ async def root(request: Request):
 
 @app.get("/companies", response_class=HTMLResponse)
 async def companies_page(request: Request):
-    if not is_setup_complete():
-        return RedirectResponse("/setup")
     companies = get_all_companies()
     return _tr(request, "companies.html", {
         "companies": companies,
@@ -178,8 +135,7 @@ async def cv_upload(file: UploadFile = File(...)):
 
 def _extract_pdf_text(content: bytes) -> str:
     try:
-        import pypdf
-        import io
+        import pypdf, io
         reader = pypdf.PdfReader(io.BytesIO(content))
         return "\n".join(p.extract_text() or "" for p in reader.pages)
     except Exception:
@@ -226,25 +182,23 @@ async def report_send():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-# ── Settings ──────────────────────────────────────────────────────────────────
+# ── Alert Settings (recipient email + schedule) ───────────────────────────────
 
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
+@app.get("/alerts", response_class=HTMLResponse)
+async def alerts_page(request: Request):
     env = _read_env()
-    return _tr(request, "settings.html", {
-        "gemini_api_key": env.get("GEMINI_API_KEY", ""),
+    return _tr(request, "alerts.html", {
         "report_recipient": env.get("REPORT_RECIPIENT", ""),
-        "threshold": get_setting("match_threshold", "50"),
         "scrape_time": get_setting("scrape_time", "07:00"),
         "report_day": get_setting("report_day", "monday"),
         "report_time": get_setting("report_time", "08:00"),
-        "active_nav": "settings",
+        "match_threshold": get_setting("match_threshold", "50"),
+        "active_nav": "alerts",
     })
 
 
-@app.post("/settings")
-async def settings_save(
-    gemini_api_key: str = Form(""),
+@app.post("/alerts")
+async def alerts_save(
     report_recipient: str = Form(""),
     scrape_time: str = Form("07:00"),
     report_day: str = Form("monday"),
@@ -252,16 +206,13 @@ async def settings_save(
     match_threshold: str = Form("50"),
 ):
     env = _read_env()
-    env.update({
-        "GEMINI_API_KEY": gemini_api_key,
-        "REPORT_RECIPIENT": report_recipient,
-    })
+    env["REPORT_RECIPIENT"] = report_recipient
     _write_env(env)
     set_setting("scrape_time", scrape_time)
     set_setting("report_day", report_day)
     set_setting("report_time", report_time)
     set_setting("match_threshold", match_threshold)
-    return RedirectResponse("/settings", status_code=303)
+    return RedirectResponse("/alerts", status_code=303)
 
 
 # ── REST API ──────────────────────────────────────────────────────────────────

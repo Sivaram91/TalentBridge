@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %} — Alert Settings{% endblock %}
+{% block breadcrumb %}Alert Settings{% endblock %}
+
+{% block content %}
+<div class="screen-content" style="max-width:540px">
+  <div class="screen-header">
+    <div>
+      <h1 class="screen-title">Alert Settings</h1>
+      <p class="screen-sub">Where to send alerts and when to run the daily scrape.</p>
+    </div>
+  </div>
+
+  <form method="POST" action="/alerts">
+
+    <!-- Recipient -->
+    <div style="margin-bottom:32px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        Email Alerts
+        <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Your Email Address</label>
+        <input class="form-input" type="email" name="report_recipient"
+               value="{{ report_recipient }}" placeholder="you@email.com">
+        <div class="form-hint">Daily match alerts and weekly reports are sent to this address.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Match Threshold (%)</label>
+        <div style="display:flex;align-items:center;gap:12px">
+          <input class="form-input" type="number" name="match_threshold" min="0" max="100"
+                 value="{{ match_threshold }}" style="max-width:100px">
+          <span style="font-size:13px;color:var(--muted-fg)">Only jobs scoring above this are included in alerts</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule -->
+    <div style="margin-bottom:32px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        Schedule
+        <span style="flex:1;height:1px;background:var(--accent-bg);display:block"></span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Daily Scrape Time</label>
+        <input class="form-input" type="time" name="scrape_time"
+               value="{{ scrape_time }}" style="max-width:160px">
+        <div class="form-hint">Companies are scraped once a day at this time.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" class="form-group">
+        <div>
+          <label class="form-label">Weekly Report Day</label>
+          <select class="form-input" name="report_day">
+            {% for d in ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] %}
+            <option value="{{ d }}" {% if report_day == d %}selected{% endif %}>{{ d | capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Report Time</label>
+          <input class="form-input" type="time" name="report_time" value="{{ report_time }}">
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn">Save</button>
+  </form>
+</div>
+{% endblock %}
