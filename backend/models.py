@@ -11,7 +11,10 @@ def get_all_companies():
         rows = conn.execute("""
             SELECT
                 c.id, c.name, c.url, c.added_date,
-                COUNT(CASE WHEN j.is_expired=0 THEN 1 END)          AS active_job_count,
+                c.fetch, c.method, c.job_link_selector, c.title_selector,
+                c.pagination_json, c.api_body_json, c.job_base_url, c.portal_url,
+                COUNT(CASE WHEN j.is_expired=0 THEN 1 END)                        AS active_job_count,
+                COUNT(CASE WHEN j.is_expired=0 AND j.description IS NOT NULL AND j.description!='' THEN 1 END) AS desc_fetched_count,
                 (SELECT COUNT(*) FROM matches m
                  JOIN jobs j2 ON m.job_id=j2.id
                  WHERE j2.company_id=c.id AND j2.is_expired=0
@@ -34,22 +37,115 @@ def get_all_companies():
     return [dict(r) for r in rows]
 
 
+def _query_variants(query: str) -> list[str]:
+    q = query.strip().lower()
+    variants = {
+        q,
+        q.replace(" ", ""),
+        q.replace(" ", "-"),
+        q.replace("-", " "),
+        q.replace("-", ""),
+    }
+    return [v for v in variants if v]
+
+
+def search_jobs_by_keyword(query: str):
+    """Search title, description, location with variant expansion and fuzzy title matching."""
+    import difflib
+    variants = _query_variants(query)
+    tokens = [w for w in query.lower().split() if len(w) > 3]
+    search_terms = list(set(variants + tokens))
+
+    with get_conn() as conn:
+        all_jobs = conn.execute(
+            "SELECT id, company_id, title FROM jobs WHERE is_expired=0"
+        ).fetchall()
+
+        conds = " OR ".join(
+            ["(j.title LIKE ? OR j.description LIKE ? OR j.location LIKE ?)"] * len(search_terms)
+        )
+        params = []
+        for t in search_terms:
+            like = f"%{t}%"
+            params += [like, like, like]
+        like_rows = conn.execute(
+            f"SELECT id FROM jobs j WHERE is_expired=0 AND ({conds})", params
+        ).fetchall()
+
+    matched_ids = {r["id"] for r in like_rows}
+
+    # Fuzzy pass on titles for typo tolerance (ratio >= 0.75)
+    q_lower = query.lower()
+    for job in all_jobs:
+        if job["id"] not in matched_ids:
+            if difflib.SequenceMatcher(None, q_lower, (job["title"] or "").lower()).ratio() >= 0.75:
+                matched_ids.add(job["id"])
+
+    result = {}
+    for job in all_jobs:
+        if job["id"] not in matched_ids:
+            continue
+        cid = job["company_id"]
+        if cid not in result:
+            result[cid] = {"count": 0, "job_ids": []}
+        result[cid]["count"] += 1
+        result[cid]["job_ids"].append(str(job["id"]))
+
+    return {cid: {"count": v["count"], "job_ids": ",".join(v["job_ids"])}
+            for cid, v in result.items()}
+
+
+def get_jobs_summary_by_company():
+    """Returns {company_id: [{"id", "title", "location", "country", "score"}, ...]} for active jobs."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT j.id, j.company_id, j.title, j.location, j.country, COALESCE(m.match_score, -1) AS score
+            FROM jobs j
+            LEFT JOIN matches m ON m.job_id = j.id
+            WHERE j.is_expired = 0
+        """).fetchall()
+    result = {}
+    for r in rows:
+        cid = r["company_id"]
+        if cid not in result:
+            result[cid] = []
+        result[cid].append({
+            "id": r["id"],
+            "title": r["title"] or "",
+            "location": r["location"] or "",
+            "country": r["country"] or "",
+            "score": r["score"],
+        })
+    return result
+
+
 def get_company(company_id: int):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone()
     return dict(row) if row else None
 
 
-def upsert_company(name: str, url: str) -> int:
+def upsert_company(name: str, url: str, fetch: str = "http", method: str = "css",
+                   job_link_selector: str = "", title_selector: str = "",
+                   pagination_json: str = "{}", api_body_json: str = "{}",
+                   job_base_url: str = "", portal_url: str = "") -> int:
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT id FROM companies WHERE name=?", (name,)
-        ).fetchone()
+        existing = conn.execute("SELECT id FROM companies WHERE name=?", (name,)).fetchone()
         if existing:
-            conn.execute("UPDATE companies SET url=? WHERE id=?", (url, existing["id"]))
+            conn.execute(
+                """UPDATE companies SET url=?, fetch=?, method=?, job_link_selector=?,
+                   title_selector=?, pagination_json=?, api_body_json=?, job_base_url=?,
+                   portal_url=? WHERE id=?""",
+                (url, fetch, method, job_link_selector, title_selector,
+                 pagination_json, api_body_json, job_base_url, portal_url, existing["id"])
+            )
             return existing["id"]
         cur = conn.execute(
-            "INSERT INTO companies (name, url) VALUES (?,?)", (name, url)
+            """INSERT INTO companies (name, url, fetch, method, job_link_selector,
+               title_selector, pagination_json, api_body_json, job_base_url, portal_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (name, url, fetch, method, job_link_selector, title_selector,
+             pagination_json, api_body_json, job_base_url, portal_url)
         )
         return cur.lastrowid
 
@@ -101,6 +197,23 @@ def mark_expired_jobs(company_id: int, seen_titles: list[str]):
         """.format(",".join("?" * len(seen_titles))),
             [company_id] + seen_titles
         )
+
+
+def get_all_active_jobs():
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT j.id, j.title, j.location, j.url, j.first_seen,
+                   c.id AS company_id, c.name AS company_name,
+                   m.match_score, m.reasoning,
+                   d.decision
+            FROM jobs j
+            JOIN companies c ON c.id = j.company_id
+            LEFT JOIN matches   m ON m.job_id = j.id
+            LEFT JOIN decisions d ON d.job_id = j.id
+            WHERE j.is_expired = 0
+            ORDER BY COALESCE(m.match_score, -1) DESC, c.name, j.title
+        """).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_all_decided_jobs():

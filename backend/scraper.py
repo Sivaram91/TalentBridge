@@ -1,39 +1,255 @@
-"""Playwright scraper with rate-limit-aware queue."""
+"""Deterministic scraper — CSS selectors, Workday API, paginated HTML. AI never used for scraping."""
 import asyncio
+import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-# Per-company retry config
 MAX_RETRIES = 3
-RETRY_BACKOFF = [30, 120, 300]  # seconds between retries
+RETRY_BACKOFF = [30, 120, 300]
+
+_HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+_scrape_lock = asyncio.Lock()
+_desc_semaphore = asyncio.Semaphore(5)
+_desc_fetch_active = 0  # number of companies currently having descriptions fetched
+_desc_fetch_done   = 0  # jobs processed in current fetch run
+_desc_fetch_total  = 0  # total jobs to process in current fetch run
+_scrape_started_at: float = 0.0
 
 
 async def scrape_company(company: dict) -> Optional[list[dict]]:
-    """
-    Scrape a single company's career page.
-    Returns list of job dicts [{title, description, url, location}] or None on failure.
-    Uses Gemini to extract structured data from raw HTML.
-    """
-    from .gemini import extract_jobs_from_html
+    method = company.get("method") or "css"
 
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.error("Playwright not installed")
+    if method == "workday":
+        return await _scrape_workday(company)
+    elif method == "paginated_css":
+        return await _scrape_paginated_css(company)
+    elif method == "paginated_json_embed":
+        return await _scrape_paginated_json_embed(company)
+    else:
+        return await _scrape_css(company)
+
+
+# ── CSS scraper (single page) ────────────────────────────────────────────────
+
+async def _scrape_css(company: dict) -> Optional[list[dict]]:
+    selector = company.get("job_link_selector", "").strip()
+    if not selector:
+        logger.warning("No job_link_selector for %s — skipping", company["name"])
         return None
-
-    html = await _fetch_page(company["url"])
+    fetch = company.get("fetch") or "http"
+    html = await _fetch_http(company["url"]) if fetch == "http" else await _fetch_js(company["url"])
     if html is None:
         return None
+    jobs = _parse_css(html, selector, company.get("title_selector", ""))
+    logger.info("CSS extracted %d jobs from %s", len(jobs), company["name"])
+    return jobs or None
 
-    jobs = await extract_jobs_from_html(html, company["name"])
+
+# ── Paginated CSS scraper ────────────────────────────────────────────────────
+
+async def _scrape_paginated_css(company: dict) -> Optional[list[dict]]:
+    pagination = json.loads(company.get("pagination_json", "{}"))
+    param = pagination.get("param", "page")
+    step = pagination.get("step", 1)
+    start = pagination.get("start", 1)
+    selector = company.get("job_link_selector", "")
+    title_sel = company.get("title_selector", "")
+    base_url = company["url"]
+    all_jobs: list[dict] = []
+    seen_titles: set[str] = set()
+    page = start
+
+    while True:
+        url = f"{base_url}{'&' if '?' in base_url else '?'}{param}={page}"
+        html = await _fetch_http(url)
+        if not html:
+            break
+        jobs = _parse_css(html, selector, title_sel)
+        new = [j for j in jobs if j["title"].lower() not in seen_titles]
+        if not new:
+            break
+        for j in new:
+            seen_titles.add(j["title"].lower())
+        all_jobs.extend(new)
+        logger.debug("Page %s: +%d jobs (%d total) from %s", page, len(new), len(all_jobs), company["name"])
+        page += step
+
+    logger.info("Paginated CSS extracted %d jobs from %s", len(all_jobs), company["name"])
+    return all_jobs or None
+
+
+# ── Workday JSON API scraper ─────────────────────────────────────────────────
+
+async def _scrape_workday(company: dict) -> Optional[list[dict]]:
+    api_url = company["url"]
+    base_body = json.loads(company.get("api_body_json", "{}"))
+    job_base_url = company.get("job_base_url", "")
+    limit = base_body.get("limit", 20)
+    all_jobs: list[dict] = []
+    offset = 0
+    total = 0
+
+    async with httpx.AsyncClient(timeout=30, headers=_HTTP_HEADERS) as client:
+        while True:
+            body = {**base_body, "limit": limit, "offset": offset}
+            try:
+                resp = await client.post(api_url, json=body, headers={"Content-Type": "application/json"})
+                if resp.status_code != 200:
+                    logger.warning("Workday API %s -> %d", api_url, resp.status_code)
+                    break
+                data = resp.json()
+            except Exception as e:
+                logger.warning("Workday API error for %s: %s", company["name"], e)
+                break
+
+            postings = data.get("jobPostings", [])
+            if not postings:
+                break
+
+            for p in postings:
+                title = p.get("title", "").strip()
+                path = p.get("externalPath", "")
+                url = f"{job_base_url}{path}" if path else ""
+                location = p.get("locationsText", "")
+                if title:
+                    all_jobs.append({"title": title, "url": url, "location": location, "description": ""})
+
+            page_total = data.get("total", 0)
+            if page_total:
+                total = page_total
+            offset += limit
+            logger.debug("Workday offset %d/%d for %s", offset, total, company["name"])
+            if total and offset >= total:
+                break
+
+    logger.info("Workday API extracted %d jobs from %s", len(all_jobs), company["name"])
+    return all_jobs or None
+
+
+async def _fetch_http(url: str) -> Optional[str]:
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=_HTTP_HEADERS) as client:
+            resp = await client.get(url)
+        return resp.text if resp.status_code == 200 else None
+    except Exception as e:
+        logger.warning("HTTP fetch failed %s: %s", url, e)
+        return None
+
+
+async def _scrape_paginated_json_embed(company: dict) -> Optional[list[dict]]:
+    """Scrape sites that embed job data as a JS object in the page (e.g. ABB phApp.ddo)."""
+    import re
+    pagination = json.loads(company.get("pagination_json", "{}"))
+    param = pagination.get("param", "from")
+    step = pagination.get("step", 10)
+    start = pagination.get("start", 0)
+    base_url = company["url"]
+    all_jobs: list[dict] = []
+    seen: set[str] = set()
+    offset = start
+
+    while True:
+        url = f"{base_url}{'&' if '?' in base_url else '?'}{param}={offset}"
+        html = await _fetch_http(url)
+        if not html:
+            break
+
+        # ABB/Phenom: eagerLoadRefineSearch.totalHits + eagerLoadRefineSearch.data.jobs
+        total_m = re.search(r'"totalHits"\s*:\s*(\d+)', html)
+        total = int(total_m.group(1)) if total_m else 0
+
+        # Find start of jobs array using bracket counting (nested arrays inside jobs)
+        marker = '"eagerLoadRefineSearch"'
+        marker_pos = html.find(marker)
+        if marker_pos < 0:
+            break
+        jobs_key = html.find('"jobs":[', marker_pos)
+        if jobs_key < 0:
+            break
+        arr_start = jobs_key + len('"jobs":')
+        depth, i, n = 0, arr_start, len(html)
+        while i < n:
+            if html[i] == '[':
+                depth += 1
+            elif html[i] == ']':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        try:
+            jobs_data = json.loads(html[arr_start:i+1])
+        except Exception:
+            break
+
+        if not jobs_data:
+            break
+
+        new = []
+        for j in jobs_data:
+            title = j.get("title", "").strip()
+            if not title or title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            job_id = j.get("jobId", "")
+            url_path = j.get("applyUrl") or j.get("canonicalPositionUrl") or ""
+            location = j.get("city", "") or j.get("country", "")
+            new.append({"title": title, "url": url_path, "location": location, "description": ""})
+
+        if not new:
+            break
+        all_jobs.extend(new)
+        logger.debug("JSON-embed offset %d/%d: +%d jobs (%d total) from %s", offset, total, len(new), len(all_jobs), company["name"])
+        offset += step
+        if total and offset >= total:
+            break
+
+    logger.info("JSON-embed extracted %d jobs from %s", len(all_jobs), company["name"])
+    return all_jobs or None
+
+
+def _parse_css(html: str, job_link_selector: str, title_selector: str) -> list[dict]:
+    """Parse job listings from HTML using explicit CSS selectors via BeautifulSoup."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logger.error("beautifulsoup4 not installed — cannot use CSS selectors")
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = []
+    seen = set()
+
+    for el in soup.select(job_link_selector):
+        # Get URL from the element or its closest anchor
+        anchor = el if el.name == "a" else el.find("a")
+        url = anchor["href"] if anchor and anchor.get("href") else ""
+
+        # Get title: from title_selector scoped to this element, or anchor text
+        if title_selector:
+            title_el = el.select_one(title_selector)
+            title = title_el.get_text(strip=True) if title_el else (anchor.get_text(strip=True) if anchor else "")
+        else:
+            title = (anchor.get_text(strip=True) if anchor else el.get_text(strip=True))
+
+        title = title.strip()
+        if not title or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        jobs.append({"title": title, "url": url, "description": "", "location": ""})
+
     return jobs
 
 
-async def _fetch_page(url: str) -> Optional[str]:
+async def _fetch_js(url: str) -> Optional[str]:
     try:
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
@@ -43,22 +259,198 @@ async def _fetch_page(url: str) -> Optional[str]:
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
-                )
+                ),
+                viewport={"width": 1280, "height": 900},
             )
             page = await context.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            # Allow JS to render
-            await asyncio.sleep(2)
+
+            # Block images/fonts/media to speed up load
+            await page.route("**/*", lambda route: route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_())
+
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
+            # Scroll down in steps to trigger lazy-loaded job listings
+            for _ in range(5):
+                await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await asyncio.sleep(0.8)
+
+            # Extra wait for XHR/fetch calls to settle
+            await asyncio.sleep(3)
+
             html = await page.content()
             await browser.close()
+            logger.debug("Fetched %d chars from %s", len(html), url)
             return html
     except Exception as e:
         logger.warning("Failed to fetch %s: %s", url, e)
         return None
 
 
+def _extract_body_text(html: str) -> str:
+    """Strip boilerplate tags and return line-structured text preserving block boundaries."""
+    import re
+    try:
+        from bs4 import BeautifulSoup, NavigableString, Tag
+    except ImportError:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "noscript"]):
+        tag.decompose()
+
+    # Insert explicit newlines at block-level boundaries before extracting text
+    BLOCK_TAGS = {"p", "div", "section", "article", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+                  "tr", "br", "dt", "dd", "blockquote"}
+    for tag in soup.find_all(True):
+        if tag.name in BLOCK_TAGS:
+            tag.insert_before("\n")
+            tag.insert_after("\n")
+
+    raw = soup.get_text(separator="")
+    # Normalise: collapse spaces within lines, collapse 3+ blank lines to 2
+    lines = [" ".join(ln.split()) for ln in raw.splitlines()]
+    # Remove duplicate consecutive lines (title repeated in meta/og tags etc.)
+    deduped = []
+    for ln in lines:
+        if not deduped or ln != deduped[-1]:
+            deduped.append(ln)
+    text = "\n".join(deduped)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:4000]
+
+
+def _normalise_job_url(url: str) -> str:
+    """Return the job description URL, stripping apply/confirm suffixes."""
+    import re
+    # Workday and similar: strip /apply, /apply/autofillWithResume, /confirm etc.
+    url = re.sub(r'/(apply|confirm|autofill[^?#]*)([\?#].*)?$', '', url, flags=re.IGNORECASE)
+    return url.rstrip('/')
+
+
+def _is_js_required(url: str) -> bool:
+    """Return False for sites known to render server-side (Workday, Greenhouse, etc.)."""
+    _NO_JS_DOMAINS = ('myworkdayjobs.com', 'greenhouse.io', 'lever.co', 'ashbyhq.com', 'smartrecruiters.com')
+    return not any(d in url for d in _NO_JS_DOMAINS)
+
+
+async def _fetch_job_description(url: str) -> str:
+    """Fetch one job detail page; return up to 3000 chars of cleaned body text."""
+    url = _normalise_job_url(url)
+    async with _desc_semaphore:
+        html = None
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HTTP_HEADERS) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    html = resp.text
+        except Exception as e:
+            logger.debug("HTTP desc fetch failed %s: %s", url, e)
+
+        if html:
+            text = _extract_body_text(html)
+            if len(text) >= 200:
+                return text[:3000]
+
+        # Only try Playwright for JS-rendered sites
+        if not _is_js_required(url):
+            return ""
+
+        try:
+            html = await _fetch_js(url)
+            if html:
+                text = _extract_body_text(html)
+                return text[:3000]
+        except Exception as e:
+            logger.debug("Playwright desc fetch failed %s: %s", url, e)
+
+    return ""
+
+
+async def _fetch_all_descriptions(company_id: int, force: bool = False):
+    """Background task: fetch descriptions for jobs of a company.
+    force=True re-fetches even jobs that already have a description.
+    Saves incrementally in batches of 5 so the progress counter updates live."""
+    global _desc_fetch_active, _desc_fetch_done
+    _desc_fetch_active += 1
+    try:
+        from .db import get_conn
+        with get_conn() as conn:
+            if force:
+                jobs = conn.execute(
+                    "SELECT id, url FROM jobs WHERE company_id=? AND is_expired=0 AND url != ''",
+                    (company_id,)
+                ).fetchall()
+            else:
+                jobs = conn.execute(
+                    "SELECT id, url FROM jobs WHERE company_id=? AND is_expired=0 "
+                    "AND (description IS NULL OR description='')",
+                    (company_id,)
+                ).fetchall()
+
+        jobs_with_url = [j for j in jobs if j["url"]]
+        if not jobs_with_url:
+            return
+
+        logger.info("Fetching descriptions for %d jobs (company %d)", len(jobs_with_url), company_id)
+        total_saved = 0
+
+        # Process in batches of 5 (matches semaphore size) — save after each batch
+        BATCH = 5
+        for i in range(0, len(jobs_with_url), BATCH):
+            batch = jobs_with_url[i:i + BATCH]
+            results = await asyncio.gather(
+                *[_fetch_job_description(j["url"]) for j in batch],
+                return_exceptions=True
+            )
+            with get_conn() as conn:
+                for job, desc in zip(batch, results):
+                    if isinstance(desc, str) and desc:
+                        conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
+                        total_saved += 1
+                    _desc_fetch_done += 1
+
+        logger.info("Saved descriptions for %d/%d jobs (company %d)", total_saved, len(jobs_with_url), company_id)
+
+        # Resolve country for all active jobs of this company that don't have one yet
+        try:
+            from .geo import resolve_countries_for_jobs
+            with get_conn() as conn:
+                unresolved = conn.execute(
+                    "SELECT id, location FROM jobs WHERE company_id=? AND is_expired=0 AND (country IS NULL OR country='')",
+                    (company_id,)
+                ).fetchall()
+            if unresolved:
+                resolved = resolve_countries_for_jobs([(r["id"], r["location"] or "") for r in unresolved])
+                with get_conn() as conn:
+                    for jid, country in resolved:
+                        if country:
+                            conn.execute("UPDATE jobs SET country=? WHERE id=?", (country, jid))
+        except Exception as e:
+            logger.warning("Country resolution failed for company %d: %s", company_id, e)
+
+        # Trigger matching now that descriptions are available for this company
+        try:
+            from .matcher import run_matching
+            await run_matching()
+        except Exception as e:
+            logger.exception("Matching failed after description fetch for company %d: %s", company_id, e)
+    finally:
+        _desc_fetch_active -= 1
+
+
 async def run_scrape():
-    """Main scrape loop — processes all companies with rate-limit handling."""
+    """Main scrape loop — processes all companies sequentially with rate-limit handling."""
+    global _scrape_started_at
+    if _scrape_lock.locked():
+        logger.warning("Scrape already in progress — skipping")
+        return
+    _scrape_started_at = time.monotonic()
+    async with _scrape_lock:
+        await _do_scrape()
+
+
+async def _do_scrape():
     from .models import get_all_companies, upsert_job, mark_expired_jobs, log_scrape, get_setting
     from .gemini import GeminiRateLimitError
 
@@ -112,6 +504,9 @@ async def run_scrape():
                 mark_expired_jobs(cid, seen_titles)
 
             log_scrape(cid, len(seen_titles), "success")
+
+            # Kick off description fetching in background (non-blocking)
+            asyncio.create_task(_fetch_all_descriptions(cid))
             logger.info("Scraped %d jobs from %s", len(seen_titles), company["name"])
 
         except GeminiRateLimitError as e:
@@ -125,14 +520,7 @@ async def run_scrape():
             logger.exception("Unexpected error scraping %s: %s", company["name"], e)
             log_scrape(cid, 0, "failed")
 
-    logger.info("Daily scrape complete")
-
-    # Trigger matching after scrape
-    try:
-        from .matcher import run_matching
-        await run_matching()
-    except Exception as e:
-        logger.exception("Matching failed: %s", e)
+    logger.info("Daily scrape complete — description fetching and matching running in background")
 
 
 def _maybe_send_failure_alert(company: dict, consecutive_failures: int):

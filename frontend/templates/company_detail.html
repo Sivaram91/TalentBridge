@@ -36,7 +36,7 @@
       <span style="color:var(--border)">/</span>
       <h1 class="screen-title" style="margin:0">{{ company.name }}</h1>
     </div>
-    <a href="{{ company.url }}" target="_blank" rel="noreferrer" class="btn-outline">
+    <a href="{{ company.portal_url or company.url }}" target="_blank" rel="noreferrer" class="btn-outline">
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
         <path d="M6 3H3a1 1 0 00-1 1v9a1 1 0 001 1h9a1 1 0 001-1v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         <path d="M9 2h5v5M14 2L8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -78,7 +78,15 @@
         (f == 'expired'   and job.is_expired == 1)
       ) %}
       {% if show %}
-      <div class="job-row {% if job.is_expired %}job-expired{% endif %}" id="job-{{ job.id }}">
+      <div class="job-row {% if job.is_expired %}job-expired{% endif %}" id="job-{{ job.id }}"
+           data-title="{{ job.title | e }}"
+           data-location="{{ job.location or '' | e }}"
+           data-country="{{ job.country or '' | e }}"
+           data-description="{{ job.description or '' | e }}"
+           data-score="{{ job.match_score if job.match_score is not none else '' }}"
+           data-reasoning="{{ job.reasoning or '' | e }}"
+           data-url="{{ job.url or '' | e }}"
+           style="cursor:pointer" onclick="openJobPanel({{ job.id }})">
         <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0">
           {{ score_badge(job.match_score) }}
           <div style="flex:1;min-width:0">
@@ -110,7 +118,7 @@
           </div>
         </div>
 
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0" onclick="event.stopPropagation()">
           <!-- Decision inline editor -->
           <div class="decision-view-{{ job.id }}">
             <button onclick="openDecision({{ job.id }}, '{{ job.decision or '' }}', '{{ job.decision_reason or '' }}')"
@@ -159,6 +167,36 @@
   {% endif %}
 </div>
 
+<!-- Job description side panel -->
+<div id="job-panel-overlay" onclick="closeJobPanel()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900"></div>
+<div id="job-panel"
+     style="display:none;position:fixed;top:0;right:0;bottom:0;width:480px;max-width:100vw;
+            background:var(--surface);border-left:1px solid var(--border);z-index:901;
+            display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.22s ease">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:20px 20px 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div style="flex:1;min-width:0;padding-right:12px">
+      <div id="panel-title" style="font-size:15px;font-weight:700;color:var(--fg);line-height:1.4;margin-bottom:6px"></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span id="panel-score"></span>
+        <span id="panel-location" style="font-size:12px;color:var(--muted-fg)"></span>
+      </div>
+    </div>
+    <button onclick="closeJobPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted-fg);padding:2px;flex-shrink:0;font-size:18px;line-height:1">✕</button>
+  </div>
+  <div id="panel-reasoning" style="display:none;padding:12px 20px;background:var(--accent-bg);border-bottom:1px solid var(--border);font-size:12px;color:var(--accent);flex-shrink:0"></div>
+  <div style="flex:1;overflow-y:auto;padding:20px">
+    <div id="panel-desc-wrap">
+      <div id="panel-desc" style="font-size:13px;color:var(--fg);line-height:1.7"></div>
+      <div id="panel-no-desc" style="display:none;font-size:13px;color:var(--muted-fg);font-style:italic">No description available yet. Run "Fetch Descriptions" to populate.</div>
+    </div>
+  </div>
+  <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0">
+    <a id="panel-link" href="#" target="_blank" rel="noreferrer" class="btn" style="font-size:12px;padding:6px 14px">View Job ↗</a>
+    <button id="panel-decision-btn" onclick="openDecisionFromPanel()" class="btn-outline" style="font-size:12px;padding:6px 14px">Set decision</button>
+  </div>
+</div>
+
 <!-- Decision modal -->
 <div id="decision-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--surface);border-radius:12px;width:380px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.3)">
@@ -200,6 +238,274 @@
 
 {% block extra_scripts %}
 <script>
+// ── Global filter application ────────────────────────────────────────────────
+const FILTER_KEY = 'tb_filters';
+const LEVEL_KEYWORDS = {
+  'Werkstudent':    ['werkstudent', 'working student'],
+  'Ausbildung':     ['ausbildung', 'azubi', 'apprentice'],
+  'Duales Studium': ['duales studium', 'dual study', 'dualer student'],
+  'Junior':         ['junior', 'jr.', 'entry level', 'entry-level', 'graduate'],
+  'Senior':         ['senior', 'sr.', 'principal', 'staff'],
+  'Lead':           ['lead ', 'tech lead', 'team lead', 'head of'],
+  'Internship':     ['intern', 'praktikum', 'praktikant'],
+};
+const PROFILE_KEYWORDS = {
+  'Developer':       ['developer', 'entwickler', 'software engineer', 'software-engineer',
+                      'frontend', 'backend', 'fullstack', 'full-stack', 'full stack',
+                      'embedded', 'firmware', 'platform engineer', 'systems engineer',
+                      'application engineer', 'web engineer', 'mobile engineer',
+                      'softwareentwickler', 'softwarearchitekt'],
+  'Engineer':        ['mechanical engineer', 'electrical engineer', 'electronics engineer',
+                      'hardware engineer', 'systems engineer', 'test engineer',
+                      'maschinenbau', 'elektrotechnik', 'ingenieur'],
+  'Architect':       ['architect', 'architekt', 'solution architect', 'enterprise architect'],
+  'Scrum Master':    ['scrum master', 'scrum', 'agile coach'],
+  'Project Manager': ['project manager', 'projektmanager', 'projektleiter', 'program manager', 'programme manager'],
+  'Product Manager': ['product manager', 'product owner'],
+  'Designer':        ['designer', 'ux researcher', 'ui designer', 'ux/ui', 'user experience', 'user interface'],
+  'Data':            ['data scientist', 'data engineer', 'data analyst', 'machine learning',
+                      'ml engineer', 'ai engineer', 'analytics engineer', 'business intelligence'],
+  'DevOps':          ['devops', 'site reliability', 'sre', 'cloud engineer', 'cloud architect',
+                      'infrastructure engineer', 'platform ops', 'kubernetes', 'k8s', 'ci/cd'],
+  'QA':              ['quality assurance', 'quality engineer', 'test automation', 'tester', 'testing'],
+  'Coordinator':     ['coordinator', 'koordinator', 'consultant', 'advisor'],
+};
+
+function jobMatchesGlobalFilters(title, location, country, filters) {
+  const t           = title.toLowerCase();
+  const loc         = (location || '').trim();
+  const ctry        = (country || '').trim();
+  const noLocOk     = !!filters.includeNoLoc;
+  const isEmpty     = loc === '' && ctry === '';
+  const selectedCountries = filters.countries || [];
+  const selectedLocs      = (filters.locs || []).filter(v => v !== '');
+
+  if (selectedCountries.length) {
+    const match = (noLocOk && isEmpty) || selectedCountries.includes(ctry);
+    if (!match) return false;
+  }
+  if (selectedLocs.length) {
+    const locLower = loc.toLowerCase();
+    const match = (noLocOk && isEmpty) ||
+      selectedLocs.some(v => locLower.includes(v.toLowerCase()));
+    if (!match) return false;
+  }
+  const levelKws = (filters.level || []).flatMap(v => LEVEL_KEYWORDS[v] || []);
+  if (levelKws.length && !levelKws.some(kw => t.includes(kw))) return false;
+  const profileKws = (filters.profile || []).flatMap(v => PROFILE_KEYWORDS[v] || []);
+  if (profileKws.length && !profileKws.some(kw => t.includes(kw))) return false;
+  return true;
+}
+
+function applyGlobalFilters() {
+  let filters, searchRes;
+  try { filters   = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch(e) {}
+  try { searchRes = JSON.parse(localStorage.getItem('tb_search_results') || 'null'); } catch(e) {}
+
+  const companyId = String(window.location.pathname.split('/').pop());
+  const hasCountries = (filters?.countries || []).length > 0;
+  const hasLocs      = (filters?.locs || []).filter(v => v !== '').length > 0;
+  const hasLevel     = (filters?.level   || []).length > 0;
+  const hasProfile   = (filters?.profile || []).length > 0;
+  const savedSearch  = (filters?.search || '').trim();
+  const hasSearch    = searchRes !== null && savedSearch.length > 0;
+  const hasChips     = hasCountries || hasLocs || hasLevel || hasProfile;
+
+  if (!hasSearch && !hasChips) return;
+
+  // Build allowed job ID set from search results for this company
+  let allowedIds = null;
+  if (hasSearch) {
+    const sr = searchRes[companyId];
+    if (!sr) {
+      // No jobs for this company matched the search — hide everything
+      allowedIds = new Set();
+    } else {
+      allowedIds = new Set(sr.job_ids.split(','));
+    }
+  }
+
+  let hiddenCount = 0;
+  document.querySelectorAll('.job-row').forEach(row => {
+    const jobId = (row.id || '').replace('job-', '');
+    const title   = row.dataset.title || '';
+    const loc     = row.dataset.location || '';
+    const country = row.dataset.country || '';
+
+    const searchOk = allowedIds === null || allowedIds.has(jobId);
+    const chipOk   = !hasChips || jobMatchesGlobalFilters(title, loc, country, filters);
+
+    if (!searchOk || !chipOk) {
+      row.style.display = 'none';
+      hiddenCount++;
+    }
+  });
+
+  if (hiddenCount > 0) {
+    const filters_desc = [
+      hasSearch    ? `"${savedSearch}"` : '',
+      hasCountries ? (filters.countries || []).join('/') : '',
+      hasLocs      ? (filters.locs || []).filter(v => v).join('/') : '',
+    ].filter(Boolean).join(', ');
+    const banner = document.createElement('div');
+    banner.id = 'filter-notice';
+    banner.style.cssText = 'margin-bottom:12px;padding:8px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:6px;font-size:12px;color:var(--accent);display:flex;align-items:center;justify-content:space-between';
+    banner.innerHTML = `<span>Filters active — ${hiddenCount} job${hiddenCount>1?'s':''} hidden. <a href="/companies" style="color:var(--accent);font-weight:600">← Back to search</a></span>`;
+    const jobList = document.querySelector('.job-row')?.parentElement;
+    if (jobList) jobList.insertBefore(banner, jobList.firstChild);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', applyGlobalFilters);
+
+// ── Description formatter ─────────────────────────────────────────────────────
+
+function _esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// A line looks like a section header if it's short, doesn't end with punctuation,
+// and matches known header keywords or is title-cased/all-caps short phrase.
+const _HEADER_KW = /^(dein(e|em|en|er)?\b|your\b|what you|responsibilities|requirements|qualifications|about\b|benefits|we offer|aufgaben|profil|anforderungen|wir bieten|über uns|was wir|was du|the role|who you|nice to have|must have|why (join|us)|unser(e)?)/i;
+
+function _isHeader(line) {
+  if (!line) return false;
+  const words = line.trim().split(/\s+/);
+  if (words.length > 10) return false;                     // too long
+  if (/[.,:;!?]$/.test(line)) return false;               // ends with punctuation = sentence
+  if (_HEADER_KW.test(line)) return true;                  // matches known keyword
+  // Short ALL-CAPS or Title Case line (≤6 words)
+  if (words.length <= 6 && line === line.toUpperCase() && line.length > 3) return true;
+  return false;
+}
+
+function formatDescription(raw) {
+  if (!raw) return '';
+
+  let html = '';
+  let inList = false;
+
+  // Split into paragraph blocks (double newline), then process lines within each
+  const blocks = raw.split(/\n{2,}/);
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+
+    // If block is a single short line → check if header
+    if (lines.length === 1 && _isHeader(lines[0])) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h4 style="font-size:13px;font-weight:700;color:var(--fg);margin:16px 0 4px 0">${_esc(lines[0])}</h4>`;
+      continue;
+    }
+
+    for (const line of lines) {
+      const isBullet = /^[-–•*]\s+/.test(line);
+      const clean    = line.replace(/^[-–•*]\s+/, '').trim();
+      if (!clean) continue;
+
+      if (_isHeader(clean) && lines.length === 1) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<h4 style="font-size:13px;font-weight:700;color:var(--fg);margin:16px 0 4px 0">${_esc(clean)}</h4>`;
+      } else if (isBullet) {
+        if (!inList) { html += '<ul style="margin:4px 0 8px 18px;padding:0;list-style:disc">'; inList = true; }
+        html += `<li style="margin-bottom:3px">${_esc(clean)}</li>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p style="margin:0 0 6px">${_esc(clean)}</p>`;
+      }
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+// ── Job description side panel ───────────────────────────────────────────────
+let _panelJobId = null;
+
+function openJobPanel(jobId) {
+  const row = document.getElementById('job-' + jobId);
+  if (!row) return;
+  _panelJobId = jobId;
+
+  const title    = row.dataset.title || '';
+  const location = row.dataset.location || '';
+  const desc     = row.dataset.description || '';
+  const score    = row.dataset.score;
+  const reasoning= row.dataset.reasoning || '';
+  const url      = row.dataset.url || '';
+
+  document.getElementById('panel-title').textContent = title;
+  document.getElementById('panel-location').textContent = location;
+
+  // Score badge
+  const scoreEl = document.getElementById('panel-score');
+  if (score !== '') {
+    const s = parseInt(score);
+    const cls = s >= 70 ? 'badge-green' : s >= 50 ? 'badge-amber' : 'badge-muted';
+    scoreEl.className = 'badge-score ' + cls;
+    scoreEl.textContent = s + '%';
+    scoreEl.style.display = '';
+  } else {
+    scoreEl.style.display = 'none';
+  }
+
+  // Reasoning
+  const reasoningEl = document.getElementById('panel-reasoning');
+  if (reasoning) {
+    reasoningEl.textContent = '🔍 ' + reasoning;
+    reasoningEl.style.display = '';
+  } else {
+    reasoningEl.style.display = 'none';
+  }
+
+  // Description
+  if (desc) {
+    document.getElementById('panel-desc').innerHTML = formatDescription(desc);
+    document.getElementById('panel-desc').style.display = '';
+    document.getElementById('panel-no-desc').style.display = 'none';
+  } else {
+    document.getElementById('panel-desc').style.display = 'none';
+    document.getElementById('panel-no-desc').style.display = '';
+  }
+
+  // Link
+  const linkEl = document.getElementById('panel-link');
+  if (url) { linkEl.href = url; linkEl.style.display = ''; }
+  else { linkEl.style.display = 'none'; }
+
+  // Decision button label
+  const decisionBtns = document.querySelectorAll(`.decision-view-${jobId} button`);
+  const hasDecision = decisionBtns.length && decisionBtns[0].textContent.trim() === 'Override';
+  document.getElementById('panel-decision-btn').textContent = hasDecision ? 'Override decision' : 'Set decision';
+
+  document.getElementById('job-panel-overlay').style.display = '';
+  const panel = document.getElementById('job-panel');
+  panel.style.display = 'flex';
+  requestAnimationFrame(() => panel.style.transform = 'translateX(0)');
+}
+
+function closeJobPanel() {
+  const panel = document.getElementById('job-panel');
+  panel.style.transform = 'translateX(100%)';
+  setTimeout(() => {
+    panel.style.display = 'none';
+    document.getElementById('job-panel-overlay').style.display = 'none';
+  }, 220);
+  _panelJobId = null;
+}
+
+function openDecisionFromPanel() {
+  if (!_panelJobId) return;
+  const row = document.getElementById('job-' + _panelJobId);
+  const btn = row?.querySelector('.btn-ghost');
+  closeJobPanel();
+  setTimeout(() => btn?.click(), 250);
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJobPanel(); });
+
+// ── Decision modal ───────────────────────────────────────────────────────────
 function openDecision(jobId, currentDecision, currentReason) {
   document.getElementById('modal-job-id').value = jobId;
   document.getElementById('modal-decision').value = currentDecision;

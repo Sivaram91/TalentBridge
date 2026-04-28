@@ -22,10 +22,33 @@ def _open_browser():
     webbrowser.open(f"http://localhost:{PORT}")
 
 
+def _resolve_missing_countries():
+    """One-time background pass: fill country for jobs that have location but no country."""
+    try:
+        from .db import get_conn
+        from .geo import resolve_countries_for_jobs
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, location FROM jobs WHERE is_expired=0 AND (country IS NULL OR country='') AND location != '' AND location IS NOT NULL"
+            ).fetchall()
+        if not rows:
+            return
+        resolved = resolve_countries_for_jobs([(r["id"], r["location"]) for r in rows])
+        with get_conn() as conn:
+            for jid, country in resolved:
+                if country:
+                    conn.execute("UPDATE jobs SET country=? WHERE id=?", (country, jid))
+    except Exception:
+        pass
+
+
 def main():
     init_db()
     ensure_settings_table()
     load_partners()
+
+    # Resolve countries for existing jobs in background
+    threading.Thread(target=_resolve_missing_countries, daemon=True).start()
 
     # Start scheduler in background thread
     start_scheduler()

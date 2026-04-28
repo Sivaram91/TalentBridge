@@ -320,6 +320,7 @@ body {
 }
 
 .btn:hover { opacity: 0.88; }
+.btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 
 .btn-outline {
   display: inline-flex;
@@ -339,6 +340,7 @@ body {
 }
 
 .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+.btn-outline:disabled, .btn-outline[disabled] { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 
 .btn-ghost {
   display: inline-flex;

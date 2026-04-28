@@ -72,8 +72,11 @@
             <div style="color:var(--muted-fg);font-size:13px">Keywords will appear here after CV upload.</div>
           {% endif %}
         </div>
-        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">
-          Keywords are extracted automatically and used to score all job listings. Re-upload your CV to refresh.
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <span style="font-size:12px;color:var(--muted-fg)">Keywords are used to score all job listings.</span>
+          {% if keywords %}
+          <button class="btn" id="match-btn" onclick="runMatching()" style="font-size:12px;padding:6px 14px">Run Matching</button>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -97,6 +100,47 @@ dropZone.addEventListener('drop', e => {
 function handleFileSelect(input) {
   if (input.files[0]) uploadFile(input.files[0]);
 }
+
+let _matchPollTimer = null;
+
+async function runMatching() {
+  try {
+    const resp = await fetch('/api/match/now', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) showToast('Matching started — scores will update shortly.');
+    else showToast('Error: ' + (data.error || 'unknown'));
+  } catch(e) {
+    showToast('Failed to start matching.');
+  }
+  startMatchPolling();
+}
+
+function startMatchPolling() {
+  if (_matchPollTimer) return;
+  _matchPollTimer = setInterval(pollMatchStatus, 2000);
+  pollMatchStatus();
+}
+
+async function pollMatchStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const btn = document.getElementById('match-btn');
+    if (!btn) return;
+    if (d.matching) {
+      btn.disabled = true;
+      btn.textContent = `Matching… ${d.matching_elapsed}s`;
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Run Matching';
+      clearInterval(_matchPollTimer);
+      _matchPollTimer = null;
+    }
+  } catch(e) {}
+}
+
+// Check on page load in case matching is already running
+startMatchPolling();
 
 async function uploadFile(file) {
   document.getElementById('upload-idle').style.display = 'none';

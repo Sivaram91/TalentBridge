@@ -14,14 +14,43 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn):
+    """Add columns introduced after initial schema."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(companies)")}
+    for col, defn in [
+        ("fetch",             "TEXT NOT NULL DEFAULT 'http'"),
+        ("method",            "TEXT NOT NULL DEFAULT 'css'"),
+        ("job_link_selector", "TEXT NOT NULL DEFAULT ''"),
+        ("title_selector",    "TEXT NOT NULL DEFAULT ''"),
+        ("pagination_json",   "TEXT NOT NULL DEFAULT '{}'"),
+        ("api_body_json",     "TEXT NOT NULL DEFAULT '{}'"),
+        ("job_base_url",      "TEXT NOT NULL DEFAULT ''"),
+        ("portal_url",        "TEXT NOT NULL DEFAULT ''"),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
+
+    jobs_existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "country" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN country TEXT NOT NULL DEFAULT ''")
+
+
 def init_db():
     with get_conn() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS companies (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
-            url         TEXT NOT NULL,
-            added_date  TEXT NOT NULL DEFAULT (datetime('now'))
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT NOT NULL,
+            url                TEXT NOT NULL,
+            fetch              TEXT NOT NULL DEFAULT 'http',
+            method             TEXT NOT NULL DEFAULT 'css',
+            job_link_selector  TEXT NOT NULL DEFAULT '',
+            title_selector     TEXT NOT NULL DEFAULT '',
+            pagination_json    TEXT NOT NULL DEFAULT '{}',
+            api_body_json      TEXT NOT NULL DEFAULT '{}',
+            job_base_url       TEXT NOT NULL DEFAULT '',
+            portal_url         TEXT NOT NULL DEFAULT '',
+            added_date         TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS jobs (
@@ -74,3 +103,4 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_decisions_job ON decisions(job_id);
         CREATE INDEX IF NOT EXISTS idx_scrape_company ON scrape_log(company_id);
         """)
+        _migrate(conn)

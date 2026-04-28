@@ -16,6 +16,8 @@ from .models import (
     set_match_override,
     get_setting, set_setting, ensure_settings_table,
     get_scrape_log,
+    get_jobs_summary_by_company,
+    search_jobs_by_keyword,
 )
 
 BASE_DIR = Path(__file__).parent.parent
@@ -27,6 +29,7 @@ app = FastAPI(title="TalentBridge")
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.filters["tojson"] = lambda v: json.dumps(v, ensure_ascii=False)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,8 +68,12 @@ async def root():
 @app.get("/companies", response_class=HTMLResponse)
 async def companies_page(request: Request):
     companies = get_all_companies()
+    jobs_by_company = get_jobs_summary_by_company()
+    threshold = int(get_setting("match_threshold", "50"))
     return _tr(request, "companies.html", {
         "companies": companies,
+        "jobs_by_company": jobs_by_company,
+        "threshold": threshold,
         "active_nav": "companies",
     })
 
@@ -79,6 +86,9 @@ async def company_detail(request: Request, company_id: int):
     if not company:
         raise HTTPException(404)
     jobs = get_jobs_for_company(company_id)
+    for j in jobs:
+        if j.get("match_score") is None:
+            j["match_score"] = -1
     scrape_log = get_scrape_log(company_id, limit=5)
     threshold = int(get_setting("match_threshold", "50"))
     return _tr(request, "company_detail.html", {
@@ -239,21 +249,106 @@ async def api_override_match(job_id: int, score: int = Form(...)):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/match/now")
+async def api_match_now():
+    import asyncio
+    from .matcher import run_matching
+    asyncio.create_task(run_matching())
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/scrape/now")
 async def api_scrape_now():
-    from .scraper import run_scrape
+    from .scraper import run_scrape, _scrape_lock
     import asyncio
+    if _scrape_lock.locked():
+        return JSONResponse({"ok": False, "message": "Scrape already in progress"}, status_code=409)
     asyncio.create_task(run_scrape())
     return JSONResponse({"ok": True, "message": "Scrape started"})
 
 
+@app.post("/api/descriptions/fetch")
+async def api_fetch_descriptions():
+    import asyncio
+    from .scraper import _fetch_all_descriptions, _desc_fetch_active
+    if _desc_fetch_active > 0:
+        return JSONResponse({"ok": False, "message": "Description fetching already in progress"}, status_code=409)
+    with get_conn() as conn:
+        company_ids = [r["company_id"] for r in conn.execute(
+            "SELECT DISTINCT company_id FROM jobs WHERE is_expired=0 AND url != ''"
+        ).fetchall()]
+    if not company_ids:
+        return JSONResponse({"ok": False, "message": "No jobs with URLs found"})
+    # Reset run counters so progress starts from 0/total
+    from .scraper import _desc_fetch_done, _desc_fetch_total  # noqa — we'll set via module
+    import backend.scraper as _scraper_mod
+    with get_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE is_expired=0 AND url != ''"
+        ).fetchone()[0]
+    _scraper_mod._desc_fetch_done  = 0
+    _scraper_mod._desc_fetch_total = total
+    for cid in company_ids:
+        asyncio.create_task(_fetch_all_descriptions(cid, force=True))
+    # Also resolve countries for jobs that already have location but no country
+    import threading
+    from .main import _resolve_missing_countries
+    threading.Thread(target=_resolve_missing_countries, daemon=True).start()
+    return JSONResponse({"ok": True, "message": f"Fetching descriptions for {len(company_ids)} companies"})
+
+
+@app.get("/api/descriptions/status")
+async def api_descriptions_status():
+    import backend.scraper as _scraper_mod
+    fetching = _scraper_mod._desc_fetch_active > 0
+    if fetching and _scraper_mod._desc_fetch_total > 0:
+        # Show run-level progress while fetch is active
+        fetched = _scraper_mod._desc_fetch_done
+        total   = _scraper_mod._desc_fetch_total
+    else:
+        with get_conn() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) AS fetched
+                FROM jobs WHERE is_expired=0
+            """).fetchone()
+        fetched = row["fetched"]
+        total   = row["total"]
+    return JSONResponse({
+        "total": total,
+        "fetched": fetched,
+        "fetching": fetching,
+        "active_tasks": _desc_fetch_active,
+    })
+
+
+@app.get("/api/jobs/search")
+async def api_jobs_search(q: str = ""):
+    q = q.strip()
+    if len(q) < 2:
+        return JSONResponse({"query": q, "results": {}})
+    results = search_jobs_by_keyword(q)
+    return JSONResponse({"query": q, "results": {str(k): v for k, v in results.items()}})
+
+
 @app.get("/api/status")
 async def api_status():
+    import time
+    from .scraper import _scrape_lock, _scrape_started_at
+    from .matcher import _matching_active, _matching_started_at
     companies = get_all_companies()
     pending = sum(1 for c in companies if c.get("scrape_status") == "pending")
     failed = sum(1 for c in companies if c.get("scrape_status") == "failed")
+    scraping = _scrape_lock.locked()
+    matching = _matching_active
+    now = time.monotonic()
     return JSONResponse({
         "companies": len(companies),
         "pending": pending,
         "failed": failed,
+        "scraping": scraping,
+        "scraping_elapsed": int(now - _scrape_started_at) if scraping else 0,
+        "matching": matching,
+        "matching_elapsed": int(now - _matching_started_at) if matching else 0,
     })
