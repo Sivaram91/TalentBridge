@@ -61,7 +61,7 @@
 
   <!-- Filter tabs -->
   <div class="filter-tabs">
-    <a href="?filter=all"      class="filter-tab {% if not request.query_params.get('filter') or request.query_params.get('filter')=='all' %}active{% endif %}">All <span class="tab-count">{{ jobs|length }}</span></a>
+    <a href="?filter=all"      class="filter-tab {% if not request.query_params.get('filter') or request.query_params.get('filter')=='all' %}active{% endif %}">All <span class="tab-count">{{ active_jobs|length }}</span></a>
     <a href="?filter=matched"  class="filter-tab {% if request.query_params.get('filter')=='matched' %}active{% endif %}">Matched <span class="tab-count">{{ matched_jobs|length }}</span></a>
     <a href="?filter=unmatched" class="filter-tab {% if request.query_params.get('filter')=='unmatched' %}active{% endif %}">Unmatched <span class="tab-count">{{ active_jobs|length - matched_jobs|length }}</span></a>
     <a href="?filter=expired"  class="filter-tab {% if request.query_params.get('filter')=='expired' %}active{% endif %}">Expired <span class="tab-count">{{ expired_jobs|length }}</span></a>
@@ -72,7 +72,7 @@
     {% set f = request.query_params.get('filter', 'all') %}
     {% for job in jobs | sort(attribute='is_expired') | sort(attribute='match_score', reverse=True) %}
       {% set show = (
-        f == 'all' or
+        (f == 'all'       and job.is_expired == 0) or
         (f == 'matched'   and job.is_expired == 0 and (job.match_score or 0) >= threshold) or
         (f == 'unmatched' and job.is_expired == 0 and (job.match_score or 0) < threshold) or
         (f == 'expired'   and job.is_expired == 1)
