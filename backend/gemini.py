@@ -96,7 +96,7 @@ async def _call_gemini(base: str, api_key: str, model: str, prompt: str, tempera
 async def _call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
     url = f"{OLLAMA_BASE}/api/generate"
     payload = {"model": model, "prompt": prompt, "stream": False}
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(url, json=payload)
     if resp.status_code != 200:
         raise RuntimeError(f"Ollama error {resp.status_code}")

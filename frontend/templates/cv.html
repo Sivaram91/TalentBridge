@@ -177,7 +177,12 @@ async function loadTaxonomyStatus() {
     const d = await r.json();
     const statusEl = document.getElementById('taxonomy-status');
     const btn = document.getElementById('taxonomy-btn');
-    if (d.built) {
+    if (d.building) {
+      btn.disabled = true;
+      btn.textContent = 'Building…';
+      statusEl.textContent = 'Build in progress…';
+      _startTaxonomyPolling();
+    } else if (d.built) {
       statusEl.textContent = `${d.count} skills in taxonomy`;
       btn.textContent = 'Rebuild Taxonomy';
       showTaxonomyPreview();
@@ -295,29 +300,54 @@ async function _commitDeletion() {
   }
 }
 
+let _taxonomyPollTimer = null;
+
 async function buildTaxonomy() {
   const btn = document.getElementById('taxonomy-btn');
   const statusEl = document.getElementById('taxonomy-status');
-  btn.disabled = true;
-  btn.textContent = 'Building…';
-  statusEl.textContent = 'Mining job descriptions and validating with AI — this may take a minute…';
   try {
     const r = await fetch('/api/taxonomy/build', { method: 'POST' });
     const d = await r.json();
     if (d.ok) {
-      statusEl.textContent = `${d.count} skills validated and stored.`;
-      btn.textContent = 'Rebuild Taxonomy';
-      showToast(`Taxonomy built — ${d.count} skills curated.`);
-      showTaxonomyPreview();
+      btn.disabled = true;
+      btn.textContent = 'Building…';
+      statusEl.textContent = 'Mining job descriptions and validating with AI — this may take a minute…';
+      _startTaxonomyPolling();
     } else {
-      statusEl.textContent = 'Build failed: ' + (d.error || 'unknown error');
+      statusEl.textContent = 'Build failed: ' + (d.error || d.message || 'unknown error');
       showToast('Taxonomy build failed.');
     }
   } catch(e) {
     statusEl.textContent = 'Build failed — check server logs.';
     showToast('Taxonomy build failed.');
   }
-  btn.disabled = false;
+}
+
+function _startTaxonomyPolling() {
+  if (_taxonomyPollTimer) return;
+  _taxonomyPollTimer = setInterval(_pollTaxonomyStatus, 3000);
+}
+
+async function _pollTaxonomyStatus() {
+  try {
+    const r = await fetch('/api/taxonomy/status');
+    const d = await r.json();
+    const btn = document.getElementById('taxonomy-btn');
+    const statusEl = document.getElementById('taxonomy-status');
+    if (!d.building) {
+      clearInterval(_taxonomyPollTimer);
+      _taxonomyPollTimer = null;
+      btn.disabled = false;
+      btn.textContent = d.built ? 'Rebuild Taxonomy' : 'Build Taxonomy';
+      if (d.built) {
+        statusEl.textContent = `${d.count} skills in taxonomy`;
+        showToast(`Taxonomy built — ${d.count} skills curated.`);
+        showTaxonomyPreview();
+      } else {
+        statusEl.textContent = 'Build finished — no skills kept. Try again.';
+      }
+    }
+  } catch(e) {}
 }
 
 loadTaxonomyStatus();
@@ -328,10 +358,15 @@ async function runMatching() {
   try {
     const resp = await fetch('/api/match/now', { method: 'POST' });
     const data = await resp.json();
-    if (data.ok) showToast('Matching complete — scores updated.');
-    else showToast('Error: ' + (data.error || 'unknown'));
+    if (data.ok) {
+      showToast('Matching complete — scores updated.');
+    } else {
+      showToast('Matching error: ' + (data.error || data.detail || 'unknown — check server logs'));
+      console.error('Matching failed:', data);
+    }
   } catch(e) {
-    showToast('Failed to run matching.');
+    showToast('Failed to run matching: ' + e.message);
+    console.error(e);
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Run Matching'; }
 }
@@ -366,12 +401,17 @@ function toggleSkillType(tag) {
 
 async function saveKeywordTypes() {
   try {
-    await fetch('/cv/keyword-types', {
+    const resp = await fetch('/cv/keyword-types', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(_kwTypes),
     });
-  } catch(e) { showToast('Failed to save skill types.'); }
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      showToast('Failed to save skill types: ' + (d.detail || resp.status));
+      console.error('saveKeywordTypes failed', resp.status, d);
+    }
+  } catch(e) { showToast('Failed to save skill types: ' + e.message); }
 }
 
 // Initialise styles for CV-extracted tags on page load

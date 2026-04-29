@@ -1,7 +1,10 @@
 """FastAPI application — routes for UI and REST endpoints."""
 import json
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -273,19 +276,38 @@ async def api_override_match(job_id: int, score: int = Form(...)):
 
 @app.post("/api/match/now")
 async def api_match_now():
-    from .matcher import run_matching
-    await run_matching()
-    return JSONResponse({"ok": True})
+    try:
+        from .matcher import run_matching
+        await run_matching()
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        import traceback
+        logger.error("Matching failed: %s\n%s", e, traceback.format_exc())
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
+_taxonomy_building = False
 
 @app.post("/api/taxonomy/build")
 async def api_taxonomy_build():
-    from .skill_taxonomy import build_taxonomy
-    try:
-        skills = await build_taxonomy()
-        return JSONResponse({"ok": True, "count": len(skills)})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    import asyncio
+    global _taxonomy_building
+    if _taxonomy_building:
+        return JSONResponse({"ok": False, "message": "Build already in progress"}, status_code=409)
+
+    async def _run():
+        global _taxonomy_building
+        _taxonomy_building = True
+        try:
+            from .skill_taxonomy import build_taxonomy
+            await build_taxonomy()
+        except Exception as e:
+            logger.error("Taxonomy build failed: %s", e)
+        finally:
+            _taxonomy_building = False
+
+    asyncio.create_task(_run())
+    return JSONResponse({"ok": True, "message": "Build started"})
 
 
 @app.get("/api/taxonomy/status")
@@ -296,7 +318,7 @@ async def api_taxonomy_status():
         skills = json.loads(raw)
     except Exception:
         skills = []
-    return JSONResponse({"count": len(skills), "built": len(skills) > 0})
+    return JSONResponse({"count": len(skills), "built": len(skills) > 0, "building": _taxonomy_building})
 
 
 @app.get("/api/taxonomy/skills")
