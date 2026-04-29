@@ -315,11 +315,22 @@ async def api_descriptions_status():
             """).fetchone()
         fetched = row["fetched"]
         total   = row["total"]
+    # Always query per-company counts from DB (reflects live writes)
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT company_id,
+                   COUNT(*) AS total,
+                   COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) AS fetched
+            FROM jobs WHERE is_expired=0
+            GROUP BY company_id
+        """).fetchall()
+    by_company = {str(r["company_id"]): {"fetched": r["fetched"], "total": r["total"]} for r in rows}
     return JSONResponse({
         "total": total,
         "fetched": fetched,
         "fetching": fetching,
         "active_tasks": _scraper_mod._desc_fetch_active,
+        "by_company": by_company,
     })
 
 

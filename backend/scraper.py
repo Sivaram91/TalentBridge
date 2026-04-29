@@ -330,7 +330,7 @@ def _normalise_job_url(url: str) -> str:
 
 def _is_js_required(url: str) -> bool:
     """Return False for sites known to render server-side (Workday, Greenhouse, etc.)."""
-    _NO_JS_DOMAINS = ('myworkdayjobs.com', 'greenhouse.io', 'lever.co', 'ashbyhq.com', 'smartrecruiters.com')
+    _NO_JS_DOMAINS = ('greenhouse.io', 'lever.co', 'ashbyhq.com', 'smartrecruiters.com')
     return not any(d in url for d in _NO_JS_DOMAINS)
 
 

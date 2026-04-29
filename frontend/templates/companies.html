@@ -649,20 +649,34 @@ if (_savedQ) {
 // ── Description fetch progress polling ───────────────────────────────────────
 let _descPollTimer = null;
 
+function _applyDescStatus(d) {
+  // Global topbar counter
+  const el = document.getElementById('desc-global-status');
+  if (el) {
+    if (d.fetching) {
+      el.textContent = d.fetched + '/' + d.total + ' desc · fetching…';
+      el.style.color = 'var(--amber)';
+    } else {
+      el.textContent = d.fetched + '/' + d.total + ' desc';
+      el.style.color = d.fetched >= d.total ? 'var(--green)' : 'var(--muted-fg)';
+    }
+  }
+  // Per-company card counters
+  if (d.by_company) {
+    Object.entries(d.by_company).forEach(([cid, v]) => {
+      const el = document.getElementById('desc-progress-' + cid);
+      if (!el) return;
+      el.textContent = v.fetched + '/' + v.total + ' desc';
+      el.style.color = v.fetched >= v.total ? 'var(--green)' : 'var(--muted-fg)';
+    });
+  }
+}
+
 async function pollDescProgress() {
   try {
     const r = await fetch('/api/descriptions/status');
     const d = await r.json();
-    const el = document.getElementById('desc-global-status');
-    if (el) {
-      if (d.fetching) {
-        el.textContent = d.fetched + '/' + d.total + ' desc · fetching…';
-        el.style.color = 'var(--amber)';
-      } else {
-        el.textContent = d.fetched + '/' + d.total + ' desc';
-        el.style.color = d.fetched >= d.total ? 'var(--green)' : 'var(--muted-fg)';
-      }
-    }
+    _applyDescStatus(d);
     if (!d.fetching) {
       clearInterval(_descPollTimer);
       _descPollTimer = null;
@@ -675,16 +689,7 @@ async function pollDescProgress() {
   try {
     const r = await fetch('/api/descriptions/status');
     const d = await r.json();
-    const el = document.getElementById('desc-global-status');
-    if (el) {
-      if (d.fetching) {
-        el.textContent = d.fetched + '/' + d.total + ' desc · fetching…';
-        el.style.color = 'var(--amber)';
-      } else {
-        el.textContent = d.fetched + '/' + d.total + ' desc';
-        el.style.color = d.fetched >= d.total ? 'var(--green)' : 'var(--muted-fg)';
-      }
-    }
+    _applyDescStatus(d);
     if (d.fetching) {
       _descPollTimer = setInterval(pollDescProgress, 5000);
     }
@@ -753,6 +758,7 @@ async function pollStatus() {
       fetchBtn.disabled = false;
       fetchBtn.innerHTML = `${FETCH_DESC_ICON} Fetch Descriptions`;
     }
+    _applyDescStatus(dd);
 
     if (!d.scraping && !d.matching && !dd.fetching) {
       clearInterval(_statusPollTimer);
