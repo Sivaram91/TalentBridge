@@ -67,8 +67,25 @@
     <a href="?filter=expired"  class="filter-tab {% if request.query_params.get('filter')=='expired' %}active{% endif %}">Expired <span class="tab-count">{{ expired_jobs|length }}</span></a>
   </div>
 
+  <!-- Pagination controls (top) -->
+  <div id="pagination-bar-top" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;min-height:32px">
+    <div style="display:flex;align-items:center;gap:6px">
+      <button id="prev-btn-top" onclick="changePage(-1)" class="btn-outline" style="padding:4px 10px;font-size:12px">← Prev</button>
+      <span id="page-info-top" style="font-size:12px;color:var(--muted-fg);white-space:nowrap"></span>
+      <button id="next-btn-top" onclick="changePage(1)"  class="btn-outline" style="padding:4px 10px;font-size:12px">Next →</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:12px;color:var(--muted-fg)">Per page:</span>
+      <select id="page-size-sel" onchange="changePageSize()" style="height:28px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--fg);padding:0 8px;cursor:pointer">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+      </select>
+    </div>
+  </div>
+
   <!-- Job list -->
-  <div style="display:flex;flex-direction:column;gap:4px">
+  <div id="job-list" style="display:flex;flex-direction:column;gap:4px">
     {% set f = request.query_params.get('filter', 'all') %}
     {% for job in jobs | sort(attribute='is_expired') | sort(attribute='match_score', reverse=True) %}
       {% set show = (
@@ -137,6 +154,13 @@
       </div>
       {% endif %}
     {% endfor %}
+  </div>
+
+  <!-- Pagination controls (bottom) -->
+  <div id="pagination-bar-bot" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px">
+    <button id="prev-btn-bot" onclick="changePage(-1)" class="btn-outline" style="padding:4px 10px;font-size:12px">← Prev</button>
+    <span id="page-info-bot" style="font-size:12px;color:var(--muted-fg);white-space:nowrap"></span>
+    <button id="next-btn-bot" onclick="changePage(1)"  class="btn-outline" style="padding:4px 10px;font-size:12px">Next →</button>
   </div>
 
   <!-- Scrape log -->
@@ -337,8 +361,10 @@ function applyGlobalFilters() {
     const chipOk   = !hasChips || jobMatchesGlobalFilters(title, loc, country, filters);
 
     if (!searchOk || !chipOk) {
-      row.style.display = 'none';
+      row.dataset.filterHidden = '1';
       hiddenCount++;
+    } else {
+      row.dataset.filterHidden = '0';
     }
   });
 
@@ -357,6 +383,63 @@ function applyGlobalFilters() {
   }
 }
 
+// ── Pagination ───────────────────────────────────────────────────────────────
+const PAGE_SIZE_KEY = 'tb_page_size';
+let _currentPage = 1;
+let _pageSize    = parseInt(localStorage.getItem(PAGE_SIZE_KEY) || '10', 10);
+
+function _filterVisibleRows() {
+  return [...document.querySelectorAll('#job-list .job-row')].filter(r => r.dataset.filterHidden !== '1');
+}
+
+function renderPage() {
+  const rows     = _filterVisibleRows();
+  const total    = rows.length;
+  const pages    = Math.max(1, Math.ceil(total / _pageSize));
+  _currentPage   = Math.min(_currentPage, pages);
+  const start    = (_currentPage - 1) * _pageSize;
+  const end      = start + _pageSize;
+
+  rows.forEach((r, i) => {
+    if (i >= start && i < end) {
+      r.style.display = '';
+      r.dataset.pgHidden = '0';
+    } else {
+      r.style.display = 'none';
+      r.dataset.pgHidden = '1';
+    }
+  });
+
+  const info = total === 0 ? 'No jobs' : `${start + 1}–${Math.min(end, total)} of ${total}`;
+  ['top','bot'].forEach(pos => {
+    const infoEl = document.getElementById('page-info-' + pos);
+    const prev   = document.getElementById('prev-btn-' + pos);
+    const next   = document.getElementById('next-btn-' + pos);
+    if (infoEl) infoEl.textContent = info;
+    if (prev)   prev.disabled = _currentPage <= 1;
+    if (next)   next.disabled = _currentPage >= pages;
+  });
+
+  // Hide bottom bar if only one page
+  const botBar = document.getElementById('pagination-bar-bot');
+  if (botBar) botBar.style.display = pages <= 1 ? 'none' : '';
+  const topBar = document.getElementById('pagination-bar-top');
+  if (topBar) topBar.style.display = total === 0 ? 'none' : '';
+}
+
+function changePage(delta) {
+  _currentPage += delta;
+  renderPage();
+  document.getElementById('job-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function changePageSize() {
+  _pageSize    = parseInt(document.getElementById('page-size-sel').value, 10);
+  _currentPage = 1;
+  localStorage.setItem(PAGE_SIZE_KEY, String(_pageSize));
+  renderPage();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   applyGlobalFilters();
   // Render compact reasoning summaries on job rows
@@ -370,6 +453,14 @@ document.addEventListener('DOMContentLoaded', () => {
       el.textContent = raw;
     }
   });
+  // Restore saved page size
+  const sel = document.getElementById('page-size-sel');
+  if (sel) {
+    const saved = localStorage.getItem(PAGE_SIZE_KEY) || '10';
+    if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
+    _pageSize = parseInt(sel.value, 10);
+  }
+  renderPage();
 });
 
 // ── Description formatter ─────────────────────────────────────────────────────
