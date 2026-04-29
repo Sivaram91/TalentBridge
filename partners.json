@@ -1,9 +1,30 @@
 [
   {
-    "name": "Deutsche Bahn",
-    "url": "https://jobs.deutschebahngroup.careers/en_US/jobsGlobal/SearchJobs",
+    "name": "ABB",
+    "url": "https://careers.abb/global/en/search-results",
     "fetch": "http",
-    "job_link_selector": "a.link[href*='JobDetail']",
-    "title_selector": "h3 a.link"
+    "method": "paginated_json_embed",
+    "pagination": {"param": "from", "step": 10, "start": 0},
+    "job_link_selector": "",
+    "title_selector": ""
+  },
+  {
+    "name": "ACONEXT",
+    "url": "https://aconext.de/jobs/?search-job=&button=submit",
+    "fetch": "http",
+    "method": "css",
+    "job_link_selector": "div.each-carrier",
+    "title_selector": "h5.title"
+  },
+  {
+    "name": "Airbus",
+    "url": "https://ag.wd3.myworkdayjobs.com/wday/cxs/ag/Airbus/jobs",
+    "portal_url": "https://ag.wd3.myworkdayjobs.com/Airbus?locationCountry=dcc5b7608d8644b3a93716604e78e995",
+    "fetch": "api",
+    "method": "workday",
+    "api_body": {"appliedFacets": {"locationCountry": ["dcc5b7608d8644b3a93716604e78e995"]}, "limit": 20, "offset": 0, "searchText": ""},
+    "job_base_url": "https://ag.wd3.myworkdayjobs.com/en-US/Airbus",
+    "job_link_selector": "",
+    "title_selector": ""
   }
 ]

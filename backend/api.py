@@ -319,7 +319,7 @@ async def api_descriptions_status():
         "total": total,
         "fetched": fetched,
         "fetching": fetching,
-        "active_tasks": _desc_fetch_active,
+        "active_tasks": _scraper_mod._desc_fetch_active,
     })
 
 
