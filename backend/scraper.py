@@ -403,10 +403,26 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                 *[_fetch_job_description(j["url"]) for j in batch],
                 return_exceptions=True
             )
+            from .geo import extract_location_from_description, resolve_country
             with get_conn() as conn:
                 for job, desc in zip(batch, results):
                     if isinstance(desc, str) and desc:
-                        conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
+                        # Try to extract city from description if location is missing/vague
+                        stored = conn.execute("SELECT title, location FROM jobs WHERE id=?", (job["id"],)).fetchone()
+                        loc = stored["location"] or ""
+                        import re as _re
+                        if not loc or _re.match(r"^\d+\s+locations?$", loc, _re.IGNORECASE):
+                            extracted = extract_location_from_description(stored["title"] or "", desc)
+                            if extracted:
+                                country = resolve_country(extracted)
+                                conn.execute(
+                                    "UPDATE jobs SET description=?, location=?, country=? WHERE id=?",
+                                    (desc, extracted, country, job["id"])
+                                )
+                            else:
+                                conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
+                        else:
+                            conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
                         total_saved += 1
                     _desc_fetch_done += 1
 
