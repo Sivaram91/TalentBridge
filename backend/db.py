@@ -34,6 +34,13 @@ def _migrate(conn):
     if "country" not in jobs_existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN country TEXT NOT NULL DEFAULT ''")
 
+    cv_existing = {row[1] for row in conn.execute("PRAGMA table_info(cv)")}
+    if "extra_keywords_json" not in cv_existing:
+        conn.execute("ALTER TABLE cv ADD COLUMN extra_keywords_json TEXT NOT NULL DEFAULT '[]'")
+    if "keyword_types_json" not in cv_existing:
+        # Maps skill name → "base" | "expert". Default all existing skills to "expert".
+        conn.execute("ALTER TABLE cv ADD COLUMN keyword_types_json TEXT NOT NULL DEFAULT '{}'")
+
 
 def init_db():
     with get_conn() as conn:

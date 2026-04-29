@@ -1,4 +1,4 @@
-"""AI matching — scores all unmatched jobs against the current CV."""
+"""Heuristic job matching — scores all unmatched jobs against the current CV."""
 import asyncio
 import json
 import logging
@@ -11,7 +11,7 @@ _matching_started_at: float = 0.0
 
 
 async def run_matching():
-    """Score all unmatched (or stale) active jobs against the latest CV."""
+    """Score all unmatched active jobs against the latest CV."""
     global _matching_active, _matching_started_at
     if _matching_active:
         logger.info("Matching already in progress — skipping")
@@ -25,57 +25,39 @@ async def run_matching():
 
 
 async def _do_matching():
-    from .models import get_latest_cv, get_conn
-    from .gemini import score_job_against_cv, GeminiRateLimitError
+    from .models import get_latest_cv, save_match
     from .db import get_conn
+    from .heuristic_match import heuristic_score
+    from .skill_taxonomy import get_taxonomy
 
     cv = get_latest_cv()
     if not cv:
-        logger.info("No CV uploaded — skipping matching")
+        logger.info("No CV — skipping matching")
         return
+    all_kw = json.loads(cv["keywords_json"]) + json.loads(cv.get("extra_keywords_json") or "[]")
+    all_kw = list(dict.fromkeys(all_kw))  # deduplicate, preserve order
+    types: dict = json.loads(cv.get("keyword_types_json") or "{}")
+    # Split into base and expert lists
+    base_kw   = [k for k in all_kw if types.get(k) == "base"]
+    expert_kw = [k for k in all_kw if types.get(k) != "base"]
 
-    keywords = json.loads(cv["keywords_json"])
-    cv_text = cv["raw_text"]
+    taxonomy = get_taxonomy()  # [] if not built yet
 
-    # Only score jobs that have a description AND no match record yet
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT j.id, j.title, j.description
             FROM jobs j
             LEFT JOIN matches m ON m.job_id = j.id
-            WHERE j.is_expired = 0
-              AND m.id IS NULL
-              AND j.description IS NOT NULL
-              AND j.description != ''
+            WHERE j.is_expired = 0 AND (m.id IS NULL OR m.is_override = 0)
         """).fetchall()
-
     jobs = [dict(r) for r in rows]
-    logger.info("Matching %d unscored jobs", len(jobs))
+    logger.info("Scoring %d jobs — base: %d kw, expert: %d kw", len(jobs), len(base_kw), len(expert_kw))
 
-    from .models import save_match
+    for job in jobs:
+        score, detail = heuristic_score(
+            job.get("description") or "", base_kw, expert_kw, taxonomy
+        )
+        reasoning = json.dumps(detail, ensure_ascii=False)
+        save_match(job["id"], score, reasoning)
 
-    for i, job in enumerate(jobs):
-        # Pace requests to stay within free-tier TPM limits
-        if i > 0:
-            await asyncio.sleep(2)
-
-        retry = True
-        while retry:
-            retry = False
-            try:
-                result = await score_job_against_cv(
-                    job_title=job["title"],
-                    job_description=job.get("description") or "",
-                    cv_keywords=keywords,
-                    cv_text=cv_text,
-                )
-                save_match(job["id"], result["score"], result["reasoning"])
-            except GeminiRateLimitError as e:
-                wait = e.retry_after or 60
-                logger.warning("Rate limit during matching — waiting %ds", wait)
-                await asyncio.sleep(wait)
-                retry = True
-            except Exception as e:
-                logger.error("Matching failed for job %d: %s", job["id"], e)
-
-    logger.info("Matching complete")
+    logger.info("Matching complete — %d jobs scored", len(jobs))

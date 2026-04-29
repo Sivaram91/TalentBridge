@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from .db import get_conn
 from .models import (
     get_all_companies, get_company, get_jobs_for_company,
-    get_latest_cv, save_cv,
+    get_latest_cv, save_cv, set_extra_keywords, set_keyword_types,
     get_all_decided_jobs, save_decision,
     set_match_override,
     get_setting, set_setting, ensure_settings_table,
@@ -106,9 +106,13 @@ async def company_detail(request: Request, company_id: int):
 async def cv_page(request: Request):
     cv = get_latest_cv()
     keywords = json.loads(cv["keywords_json"]) if cv else []
+    extra_keywords = json.loads(cv["extra_keywords_json"]) if cv else []
+    keyword_types = json.loads(cv["keyword_types_json"]) if cv else {}
     return _tr(request, "cv.html", {
         "cv": cv,
         "keywords": keywords,
+        "extra_keywords": extra_keywords,
+        "keyword_types": keyword_types,
         "active_nav": "cv",
     })
 
@@ -141,6 +145,24 @@ async def cv_upload(file: UploadFile = File(...)):
         keywords = []
 
     return JSONResponse({"ok": True, "keywords": keywords})
+
+
+@app.post("/cv/keywords")
+async def cv_save_extra_keywords(keywords: list[str]):
+    cv = get_latest_cv()
+    if not cv:
+        raise HTTPException(400, "No CV uploaded yet")
+    set_extra_keywords(cv["id"], keywords)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/cv/keyword-types")
+async def cv_save_keyword_types(types: dict[str, str]):
+    cv = get_latest_cv()
+    if not cv:
+        raise HTTPException(400, "No CV uploaded yet")
+    set_keyword_types(cv["id"], types)
+    return JSONResponse({"ok": True})
 
 
 def _extract_pdf_text(content: bytes) -> str:
@@ -251,10 +273,43 @@ async def api_override_match(job_id: int, score: int = Form(...)):
 
 @app.post("/api/match/now")
 async def api_match_now():
-    import asyncio
     from .matcher import run_matching
-    asyncio.create_task(run_matching())
+    await run_matching()
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/taxonomy/build")
+async def api_taxonomy_build():
+    from .skill_taxonomy import build_taxonomy
+    try:
+        skills = await build_taxonomy()
+        return JSONResponse({"ok": True, "count": len(skills)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/taxonomy/status")
+async def api_taxonomy_status():
+    from .models import get_setting
+    raw = get_setting("skill_taxonomy_json", "[]")
+    try:
+        skills = json.loads(raw)
+    except Exception:
+        skills = []
+    return JSONResponse({"count": len(skills), "built": len(skills) > 0})
+
+
+@app.get("/api/taxonomy/skills")
+async def api_taxonomy_skills():
+    from .skill_taxonomy import get_taxonomy
+    return JSONResponse(get_taxonomy())
+
+
+@app.post("/api/taxonomy/skills")
+async def api_taxonomy_skills_save(skills: list[str]):
+    set_setting("skill_taxonomy_json", json.dumps(skills, ensure_ascii=False))
+    set_setting("skill_taxonomy_count", str(len(skills)))
+    return JSONResponse({"ok": True, "count": len(skills)})
 
 
 @app.post("/api/scrape/now")

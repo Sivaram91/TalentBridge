@@ -188,8 +188,19 @@ def upsert_job(company_id: int, title: str, description: str,
 
 
 def mark_expired_jobs(company_id: int, seen_titles: list[str]):
-    """Jobs not in seen_titles are marked expired."""
+    """Jobs not in seen_titles are marked expired.
+
+    Safety: if the new scrape returned fewer than 30% of the previously known
+    active jobs, skip expiry — the scrape likely failed or was truncated.
+    """
     with get_conn() as conn:
+        prev_count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company_id=? AND is_expired=0",
+            (company_id,)
+        ).fetchone()[0]
+        # Only expire if we saw a reasonable fraction of what was there before
+        if prev_count > 0 and len(seen_titles) < prev_count * 0.30:
+            return
         conn.execute("""
             UPDATE jobs SET is_expired=1
             WHERE company_id=? AND is_expired=0
@@ -239,6 +250,23 @@ def get_latest_cv():
             "SELECT * FROM cv ORDER BY uploaded_at DESC LIMIT 1"
         ).fetchone()
     return dict(row) if row else None
+
+
+def set_extra_keywords(cv_id: int, keywords: list[str]):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE cv SET extra_keywords_json=? WHERE id=?",
+            (json.dumps(keywords), cv_id)
+        )
+
+
+def set_keyword_types(cv_id: int, types: dict[str, str]):
+    """Store {skill: 'base'|'expert'} mapping for a CV."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE cv SET keyword_types_json=? WHERE id=?",
+            (json.dumps(types), cv_id)
+        )
 
 
 def save_cv(raw_text: str, keywords: list[str]) -> int:
