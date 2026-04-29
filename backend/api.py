@@ -322,11 +322,21 @@ async def api_scrape_now():
     return JSONResponse({"ok": True, "message": "Scrape started"})
 
 
+@app.post("/api/descriptions/cancel")
+async def api_cancel_descriptions():
+    import backend.scraper as _scraper_mod
+    if _scraper_mod._desc_fetch_active == 0:
+        return JSONResponse({"ok": False, "message": "No fetch in progress"})
+    _scraper_mod._desc_fetch_cancel = True
+    return JSONResponse({"ok": True, "message": "Cancel requested"})
+
+
 @app.post("/api/descriptions/fetch")
 async def api_fetch_descriptions():
     import asyncio
-    from .scraper import _fetch_all_descriptions, _desc_fetch_active
-    if _desc_fetch_active > 0:
+    import backend.scraper as _scraper_mod
+    from .scraper import _fetch_all_descriptions
+    if _scraper_mod._desc_fetch_active > 0:
         return JSONResponse({"ok": False, "message": "Description fetching already in progress"}, status_code=409)
     with get_conn() as conn:
         company_ids = [r["company_id"] for r in conn.execute(
@@ -334,15 +344,14 @@ async def api_fetch_descriptions():
         ).fetchall()]
     if not company_ids:
         return JSONResponse({"ok": False, "message": "No jobs with URLs found"})
-    # Reset run counters so progress starts from 0/total
-    from .scraper import _desc_fetch_done, _desc_fetch_total  # noqa — we'll set via module
-    import backend.scraper as _scraper_mod
     with get_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE is_expired=0 AND url != ''"
         ).fetchone()[0]
-    _scraper_mod._desc_fetch_done  = 0
-    _scraper_mod._desc_fetch_total = total
+    # Reset counters and cancel flag for fresh run
+    _scraper_mod._desc_fetch_done   = 0
+    _scraper_mod._desc_fetch_total  = total
+    _scraper_mod._desc_fetch_cancel = False
     for cid in company_ids:
         asyncio.create_task(_fetch_all_descriptions(cid, force=True))
     # Also resolve countries for jobs that already have location but no country
@@ -380,11 +389,20 @@ async def api_descriptions_status():
             GROUP BY company_id
         """).fetchall()
     by_company = {str(r["company_id"]): {"fetched": r["fetched"], "total": r["total"]} for r in rows}
+    # Extract just the domain/path tail for display (avoid showing full URL)
+    current_url = _scraper_mod._desc_fetch_current or ""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(current_url)
+        current_display = p.netloc + (p.path[:40] if len(p.path) > 40 else p.path)
+    except Exception:
+        current_display = current_url[:60]
     return JSONResponse({
         "total": total,
         "fetched": fetched,
         "fetching": fetching,
         "active_tasks": _scraper_mod._desc_fetch_active,
+        "current_url": current_display,
         "by_company": by_company,
     })
 

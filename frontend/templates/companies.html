@@ -6,6 +6,7 @@
   <span id="desc-global-status" style="font-family:var(--mono)">
     {{ companies | map(attribute='desc_fetched_count') | map('default', 0) | sum }}/{{ companies | map(attribute='active_job_count') | map('default', 0) | sum }} desc
   </span>
+  <span id="fetch-current-url" style="display:none;font-family:var(--mono);font-size:11px;color:var(--muted-fg);margin-left:6px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle"></span>
 {% endblock %}
 
 {% block content %}
@@ -26,6 +27,9 @@
           <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         Fetch Descriptions
+      </button>
+      <button class="btn-outline" onclick="cancelFetch()" id="cancel-fetch-btn" style="display:none;color:var(--red);border-color:var(--red)">
+        ✕ Cancel
       </button>
       <button class="btn-outline" onclick="triggerScrape()" id="scrape-btn">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -661,6 +665,30 @@ function _applyDescStatus(d) {
       el.style.color = d.fetched >= d.total ? 'var(--green)' : 'var(--muted-fg)';
     }
   }
+  // Current URL indicator
+  const urlEl = document.getElementById('fetch-current-url');
+  if (urlEl) {
+    if (d.fetching && d.current_url) {
+      urlEl.textContent = d.current_url;
+      urlEl.style.display = '';
+    } else {
+      urlEl.style.display = 'none';
+    }
+  }
+  // Cancel button visibility
+  const cancelBtn = document.getElementById('cancel-fetch-btn');
+  if (cancelBtn) cancelBtn.style.display = d.fetching ? '' : 'none';
+  // Fetch button state
+  const fetchBtn = document.getElementById('fetch-desc-btn');
+  if (fetchBtn) {
+    if (d.fetching) {
+      fetchBtn.disabled = true;
+      fetchBtn.innerHTML = `${FETCH_DESC_ICON} Fetching… ${d.fetched}/${d.total}`;
+    } else {
+      fetchBtn.disabled = false;
+      fetchBtn.innerHTML = `${FETCH_DESC_ICON} Fetch Descriptions`;
+    }
+  }
   // Per-company card counters
   if (d.by_company) {
     Object.entries(d.by_company).forEach(([cid, v]) => {
@@ -733,6 +761,17 @@ function startStatusPolling() {
   pollStatus();
 }
 
+async function cancelFetch() {
+  try {
+    await fetch('/api/descriptions/cancel', { method: 'POST' });
+    showToast('Cancelling fetch — finishing current batch…');
+    document.getElementById('cancel-fetch-btn').disabled = true;
+    document.getElementById('cancel-fetch-btn').textContent = 'Cancelling…';
+  } catch(e) {
+    showToast('Failed to cancel.');
+  }
+}
+
 async function pollStatus() {
   try {
     const r = await fetch('/api/status');
@@ -741,8 +780,6 @@ async function pollStatus() {
     const dd = await dr.json();
 
     const scrapeBtn = document.getElementById('scrape-btn');
-    const fetchBtn  = document.getElementById('fetch-desc-btn');
-
     if (d.scraping) {
       scrapeBtn.disabled = true;
       scrapeBtn.innerHTML = `${SCRAPE_ICON} Scraping… ${d.scraping_elapsed}s`;
@@ -751,16 +788,16 @@ async function pollStatus() {
       scrapeBtn.innerHTML = `${SCRAPE_ICON} Scrape Now`;
     }
 
-    if (dd.fetching) {
-      fetchBtn.disabled = true;
-      fetchBtn.innerHTML = `${FETCH_DESC_ICON} Fetching… ${dd.fetched}/${dd.total}`;
-    } else {
-      fetchBtn.disabled = false;
-      fetchBtn.innerHTML = `${FETCH_DESC_ICON} Fetch Descriptions`;
-    }
     _applyDescStatus(dd);
 
-    if (!d.scraping && !d.matching && !dd.fetching) {
+    // Reset cancel button if fetch finished
+    const cancelBtn = document.getElementById('cancel-fetch-btn');
+    if (!dd.fetching && cancelBtn) {
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = '✕ Cancel';
+    }
+
+    if (!d.scraping && !dd.fetching) {
       clearInterval(_statusPollTimer);
       _statusPollTimer = null;
     }

@@ -19,9 +19,11 @@ _HTTP_HEADERS = {
 
 _scrape_lock = asyncio.Lock()
 _desc_semaphore = asyncio.Semaphore(5)
-_desc_fetch_active = 0  # number of companies currently having descriptions fetched
-_desc_fetch_done   = 0  # jobs processed in current fetch run
-_desc_fetch_total  = 0  # total jobs to process in current fetch run
+_desc_fetch_active  = 0    # number of companies currently having descriptions fetched
+_desc_fetch_done    = 0    # jobs processed in current fetch run
+_desc_fetch_total   = 0    # total jobs to process in current fetch run
+_desc_fetch_current = ""   # URL currently being fetched (for display)
+_desc_fetch_cancel  = False  # set True to abort the current fetch run
 _scrape_started_at: float = 0.0
 
 
@@ -370,8 +372,9 @@ async def _fetch_job_description(url: str) -> str:
 async def _fetch_all_descriptions(company_id: int, force: bool = False):
     """Background task: fetch descriptions for jobs of a company.
     force=True re-fetches even jobs that already have a description.
-    Saves incrementally in batches of 5 so the progress counter updates live."""
-    global _desc_fetch_active, _desc_fetch_done
+    Saves incrementally in batches of 5 so the progress counter updates live.
+    Respects _desc_fetch_cancel flag to abort early."""
+    global _desc_fetch_active, _desc_fetch_done, _desc_fetch_current
     _desc_fetch_active += 1
     try:
         from .db import get_conn
@@ -395,10 +398,16 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
         logger.info("Fetching descriptions for %d jobs (company %d)", len(jobs_with_url), company_id)
         total_saved = 0
 
-        # Process in batches of 5 (matches semaphore size) — save after each batch
         BATCH = 5
         for i in range(0, len(jobs_with_url), BATCH):
+            if _desc_fetch_cancel:
+                logger.info("Description fetch cancelled at job %d (company %d)", i, company_id)
+                break
+
             batch = jobs_with_url[i:i + BATCH]
+            # Update current URL indicator (first URL of batch)
+            _desc_fetch_current = batch[0]["url"] if batch else ""
+
             results = await asyncio.gather(
                 *[_fetch_job_description(j["url"]) for j in batch],
                 return_exceptions=True
@@ -407,7 +416,6 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
             with get_conn() as conn:
                 for job, desc in zip(batch, results):
                     if isinstance(desc, str) and desc:
-                        # Try to extract city from description if location is missing/vague
                         stored = conn.execute("SELECT title, location FROM jobs WHERE id=?", (job["id"],)).fetchone()
                         loc = stored["location"] or ""
                         import re as _re
@@ -424,35 +432,32 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                         else:
                             conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
                         total_saved += 1
-                    _desc_fetch_done += 1
+                    # Cap at total to avoid counter exceeding 100%
+                    _desc_fetch_done = min(_desc_fetch_done + 1, _desc_fetch_total)
 
         logger.info("Saved descriptions for %d/%d jobs (company %d)", total_saved, len(jobs_with_url), company_id)
 
-        # Resolve country for all active jobs of this company that don't have one yet
-        try:
-            from .geo import resolve_countries_for_jobs
-            with get_conn() as conn:
-                unresolved = conn.execute(
-                    "SELECT id, location FROM jobs WHERE company_id=? AND is_expired=0 AND (country IS NULL OR country='')",
-                    (company_id,)
-                ).fetchall()
-            if unresolved:
-                resolved = resolve_countries_for_jobs([(r["id"], r["location"] or "") for r in unresolved])
+        if not _desc_fetch_cancel:
+            # Resolve country for jobs that don't have one yet
+            try:
+                from .geo import resolve_countries_for_jobs
                 with get_conn() as conn:
-                    for jid, country in resolved:
-                        if country:
-                            conn.execute("UPDATE jobs SET country=? WHERE id=?", (country, jid))
-        except Exception as e:
-            logger.warning("Country resolution failed for company %d: %s", company_id, e)
-
-        # Trigger matching now that descriptions are available for this company
-        try:
-            from .matcher import run_matching
-            await run_matching()
-        except Exception as e:
-            logger.exception("Matching failed after description fetch for company %d: %s", company_id, e)
+                    unresolved = conn.execute(
+                        "SELECT id, location FROM jobs WHERE company_id=? AND is_expired=0 AND (country IS NULL OR country='')",
+                        (company_id,)
+                    ).fetchall()
+                if unresolved:
+                    resolved = resolve_countries_for_jobs([(r["id"], r["location"] or "") for r in unresolved])
+                    with get_conn() as conn:
+                        for jid, country in resolved:
+                            if country:
+                                conn.execute("UPDATE jobs SET country=? WHERE id=?", (country, jid))
+            except Exception as e:
+                logger.warning("Country resolution failed for company %d: %s", company_id, e)
     finally:
         _desc_fetch_active -= 1
+        if _desc_fetch_active == 0:
+            _desc_fetch_current = ""
 
 
 async def run_scrape():
