@@ -99,12 +99,19 @@ def search_jobs_by_keyword(query: str):
 
 
 def get_jobs_summary_by_company():
-    """Returns {company_id: [{"id", "title", "location", "country", "score"}, ...]} for active jobs."""
+    """Returns {company_id: [{id, title, location, country, score, url, description, reasoning, decision, decision_reason, posted_date, first_seen, company_name}, ...]} for active jobs."""
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT j.id, j.company_id, j.title, j.location, j.country, COALESCE(m.match_score, -1) AS score
+            SELECT j.id, j.company_id, j.title, j.location, j.country,
+                   j.url, j.description, j.posted_date, j.first_seen,
+                   c.name AS company_name,
+                   COALESCE(m.match_score, -1) AS score,
+                   m.reasoning,
+                   d.decision, d.reason AS decision_reason
             FROM jobs j
+            JOIN companies c ON c.id = j.company_id
             LEFT JOIN matches m ON m.job_id = j.id
+            LEFT JOIN decisions d ON d.job_id = j.id
             WHERE j.is_expired = 0
         """).fetchall()
     result = {}
@@ -118,6 +125,15 @@ def get_jobs_summary_by_company():
             "location": r["location"] or "",
             "country": r["country"] or "",
             "score": r["score"],
+            "url": r["url"] or "",
+            "description": r["description"] or "",
+            "reasoning": r["reasoning"] or "",
+            "decision": r["decision"],
+            "decision_reason": r["decision_reason"],
+            "posted_date": r["posted_date"],
+            "first_seen": r["first_seen"],
+            "company_name": r["company_name"] or "",
+            "company_id": cid,
         })
     return result
 

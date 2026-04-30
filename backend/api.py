@@ -99,11 +99,12 @@ async def companies_page(request: Request):
     companies = get_all_companies()
     jobs_by_company = get_jobs_summary_by_company()
     threshold = int(get_setting("match_threshold", "50"))
+    view = request.query_params.get("view", "companies")
     return _tr(request, "companies.html", {
         "companies": companies,
         "jobs_by_company": jobs_by_company,
         "threshold": threshold,
-        "active_nav": "companies",
+        "active_nav": view if view == "jobs" else "companies",
     })
 
 
@@ -133,13 +134,7 @@ async def company_detail(request: Request, company_id: int):
 
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(request: Request):
-    jobs = get_all_active_jobs()
-    companies = get_all_companies()
-    return _tr(request, "jobs.html", {
-        "jobs": jobs,
-        "companies": companies,
-        "active_nav": "jobs",
-    })
+    return RedirectResponse(url="/companies?view=jobs", status_code=302)
 
 
 # ── CV Manager ────────────────────────────────────────────────────────────────
