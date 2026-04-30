@@ -1,6 +1,8 @@
 """FastAPI application — routes for UI and REST endpoints."""
 import json
 import logging
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +30,20 @@ TEMPLATES_DIR = BASE_DIR / "frontend" / "templates"
 STATIC_DIR = BASE_DIR / "frontend" / "static"
 ENV_PATH = BASE_DIR / ".env"
 
-app = FastAPI(title="TalentBridge")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    import logging as _ll
+    global _event_loop
+    _event_loop = asyncio.get_running_loop()
+    _ll.getLogger().setLevel(_ll.INFO)
+    for noisy in ("httpx", "httpcore", "uvicorn.access"):
+        _ll.getLogger(noisy).setLevel(_ll.WARNING)
+    try:
+        yield
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass  # suppress shutdown noise from in-flight SSE connections
+
+app = FastAPI(title="TalentBridge", lifespan=_lifespan)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -61,15 +76,13 @@ def _tr(request: Request, name: str, context: dict) -> HTMLResponse:
 
 def _safe_task(coro, name: str = "task"):
     """Wrap a coroutine in create_task so exceptions are logged instead of silently lost."""
-    import asyncio as _asyncio
-
     async def _run():
         try:
             await coro
         except Exception as exc:
             logger.error("Background task '%s' failed: %s", name, exc, exc_info=True)
 
-    return _asyncio.create_task(_run())
+    return asyncio.create_task(_run())
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -421,16 +434,6 @@ _log_current_lines: int = 0
 _log_subscribers: set[asyncio.Queue] = set()
 _event_loop: asyncio.AbstractEventLoop | None = None
 
-
-@app.on_event("startup")
-async def _capture_loop():
-    global _event_loop
-    _event_loop = asyncio.get_running_loop()
-    # Set root logger to INFO so backend logger.info() calls are not swallowed
-    _logging.getLogger().setLevel(_logging.INFO)
-    # Suppress noisy libraries
-    for noisy in ("httpx", "httpcore", "uvicorn.access"):
-        _logging.getLogger(noisy).setLevel(_logging.WARNING)
 
 
 def _get_log_file() -> Path:

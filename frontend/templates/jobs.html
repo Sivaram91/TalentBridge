@@ -152,6 +152,27 @@
   width: 7px; height: 7px; border-radius: 50%;
   display: inline-block; flex-shrink: 0;
 }
+
+.chip {
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
 </style>
 {% endblock %}
 
@@ -160,11 +181,11 @@
   <div class="screen-header">
     <div>
       <div class="screen-title">All Jobs</div>
-      <div class="screen-sub">{{ jobs | length }} active jobs across {{ companies | length }} companies</div>
+      <div class="screen-sub" id="jobs-sub">{{ jobs | length }} active jobs across {{ companies | length }} companies</div>
     </div>
   </div>
 
-  <!-- Toolbar -->
+  <!-- Toolbar row 1: search + dropdowns -->
   <div class="jobs-toolbar">
     <div class="search-wrap">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -189,21 +210,6 @@
       <option value="-1">Unscored</option>
     </select>
 
-    <select id="profile-filter" class="filter-select" onchange="filterJobs()">
-      <option value="">Any Role</option>
-      <option value="Software Developer">Software Developer</option>
-      <option value="Software Architect">Software Architect</option>
-      <option value="Test Engineer">Test Engineer</option>
-      <option value="Systems Engineer">Systems Engineer</option>
-      <option value="Product Owner">Product Owner</option>
-      <option value="Scrum Master">Scrum Master</option>
-      <option value="Quality Engineer">Quality Engineer</option>
-      <option value="Project Manager">Project Manager</option>
-      <option value="DevOps / Cloud">DevOps / Cloud</option>
-      <option value="Data / ML / AI">Data / ML / AI</option>
-      <option value="__others__">Others</option>
-    </select>
-
     <select id="decision-filter" class="filter-select" onchange="filterJobs()">
       <option value="">Any Status</option>
       <option value="none">Undecided</option>
@@ -213,6 +219,15 @@
     </select>
 
     <span id="row-count"></span>
+  </div>
+
+  <!-- Profile chips -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:11px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px">Profile</span>
+    {% for profile in ['Software Developer','Software Architect','Test Engineer','Systems Engineer','Product Owner','Scrum Master','Quality Engineer','Project Manager','DevOps / Cloud','Data / ML / AI'] %}
+    <button class="chip" data-value="{{ profile }}" onclick="toggleProfileChip(this)">{{ profile }}</button>
+    {% endfor %}
+    <button class="chip" data-value="__others__" onclick="toggleProfileChip(this)">Others</button>
   </div>
 
   <!-- Table -->
@@ -249,6 +264,15 @@ const DECISION_META = {
   'skipped':    { label: 'Skipped',    color: 'var(--muted-fg)', bg: 'var(--surface-2)' },
 };
 
+let activeProfile = new Set();
+
+function toggleProfileChip(btn) {
+  const val = btn.dataset.value;
+  if (activeProfile.has(val)) { activeProfile.delete(val); btn.classList.remove('active'); }
+  else                         { activeProfile.add(val);    btn.classList.add('active'); }
+  filterJobs();
+}
+
 function scoreClass(score) {
   if (score === null || score < 0) return 'badge-muted';
   if (score >= 75) return 'badge-green';
@@ -280,17 +304,14 @@ function sortBy(col) {
   filterJobs();
 }
 
-function _matchesProfile(title, profileVal) {
-  if (profileVal === '__others__') return !titleMatchesAnyProfile(title);
-  return titleMatchesProfile(title, profileVal);
-}
-
 function filterJobs() {
   const q = document.getElementById('search-input').value.trim().toLowerCase();
   const companyId = document.getElementById('company-filter').value;
   const scoreMin = document.getElementById('score-filter').value;
-  const profileF = document.getElementById('profile-filter').value;
   const decisionF = document.getElementById('decision-filter').value;
+
+  const profileOthers = activeProfile.has('__others__');
+  const profileKws = [...activeProfile].filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
 
   let rows = ALL_JOBS.filter(j => {
     if (companyId && String(j.company_id) !== companyId) return false;
@@ -299,7 +320,13 @@ function filterJobs() {
     } else if (scoreMin) {
       if ((j.match_score ?? -1) < parseInt(scoreMin)) return false;
     }
-    if (profileF && !_matchesProfile(j.title, profileF)) return false;
+    if (activeProfile.size) {
+      const title = j.title.toLowerCase();
+      const matchesKnown = titleMatchesAnyProfile(title);
+      const matchesChips = profileKws.some(kw => _kwMatch(title, kw));
+      const matchesOthers = profileOthers && !matchesKnown;
+      if (!matchesChips && !matchesOthers) return false;
+    }
     if (decisionF === 'none') {
       if (j.decision) return false;
     } else if (decisionF && j.decision !== decisionF) {
@@ -352,11 +379,9 @@ function renderRows(rows) {
       ? `<span class="badge-score ${scoreClass(score)}">${score}%</span>`
       : `<span style="color:var(--muted-fg);font-size:12px">—</span>`;
 
-    const titleCell = j.url
-      ? `<a class="job-title-link" href="${j.url}" target="_blank" rel="noopener">${_esc(j.title)}</a>`
-      : `<span class="job-title-link" style="cursor:default">${_esc(j.title)}</span>`;
+    const titleCell = `<span class="job-title-link" style="cursor:pointer" onclick="openJobPanel(${j.id})">${_esc(j.title)}</span>`;
 
-    const companyCell = `<a class="company-pill" href="/companies/${j.company_id}">${_esc(j.company_name)}</a>`;
+    const companyCell = `<a class="company-pill" href="/companies/${j.company_id}" onclick="event.stopPropagation()">${_esc(j.company_name)}</a>`;
 
     const loc = j.location ? _esc(j.location) : `<span style="color:var(--muted-fg)">—</span>`;
 
@@ -366,9 +391,9 @@ function renderRows(rows) {
       statusCell = `<span class="badge" style="background:${m.bg};color:${m.color}">${m.label}</span>`;
     }
 
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="openJobPanel(${j.id})">
       <td style="max-width:320px">${titleCell}</td>
-      <td>${companyCell}</td>
+      <td onclick="event.stopPropagation()">${companyCell}</td>
       <td style="color:var(--muted-fg);font-size:12px">${loc}</td>
       <td>${scoreBadge}</td>
       <td>${statusCell}</td>
@@ -386,7 +411,257 @@ function _esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Job description side panel ───────────────────────────────────────────────
+const _jobById = Object.fromEntries(ALL_JOBS.map(j => [j.id, j]));
+let _panelJobId = null;
+
+const _HEADER_KW = /^(dein(e|em|en|er)?\b|your\b|what you|responsibilities|requirements|qualifications|about\b|benefits|we offer|aufgaben|profil|anforderungen|wir bieten|über uns|was wir|was du|the role|who you|nice to have|must have|why (join|us)|unser(e)?)/i;
+
+function _isHeader(line) {
+  if (!line) return false;
+  const words = line.trim().split(/\s+/);
+  if (words.length > 10) return false;
+  if (/[.,:;!?]$/.test(line)) return false;
+  if (_HEADER_KW.test(line)) return true;
+  if (words.length <= 6 && line === line.toUpperCase() && line.length > 3) return true;
+  return false;
+}
+
+function formatDescription(raw) {
+  if (!raw) return '';
+  let html = '', inList = false;
+  for (const block of raw.split(/\n{2,}/)) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.length === 1 && _isHeader(lines[0])) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h4 style="font-size:13px;font-weight:700;color:var(--fg);margin:16px 0 4px 0">${_esc(lines[0])}</h4>`;
+      continue;
+    }
+    for (const line of lines) {
+      const isBullet = /^[-–•*]\s+/.test(line);
+      const clean = line.replace(/^[-–•*]\s+/, '').trim();
+      if (!clean) continue;
+      if (_isHeader(clean) && lines.length === 1) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<h4 style="font-size:13px;font-weight:700;color:var(--fg);margin:16px 0 4px 0">${_esc(clean)}</h4>`;
+      } else if (isBullet) {
+        if (!inList) { html += '<ul style="margin:4px 0 8px 18px;padding:0;list-style:disc">'; inList = true; }
+        html += `<li style="margin-bottom:3px">${_esc(clean)}</li>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p style="margin:0 0 6px">${_esc(clean)}</p>`;
+      }
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function openJobPanel(jobId) {
+  const j = _jobById[jobId];
+  if (!j) return;
+  _panelJobId = jobId;
+
+  document.getElementById('panel-title').textContent = j.title || '';
+  document.getElementById('panel-location').textContent = j.location || '';
+
+  const scoreEl = document.getElementById('panel-score');
+  const score = j.match_score;
+  if (score !== null && score >= 0) {
+    const cls = score >= 70 ? 'badge-green' : score >= 50 ? 'badge-amber' : 'badge-muted';
+    scoreEl.className = 'badge-score ' + cls;
+    scoreEl.textContent = score + '%';
+    scoreEl.style.display = '';
+  } else {
+    scoreEl.style.display = 'none';
+  }
+
+  // Company link in panel header
+  const compEl = document.getElementById('panel-company');
+  if (compEl) {
+    compEl.textContent = j.company_name || '';
+    compEl.href = `/companies/${j.company_id}`;
+  }
+
+  // Match breakdown
+  const breakdownEl = document.getElementById('panel-match-breakdown');
+  let detail = null;
+  try { detail = j.reasoning ? JSON.parse(j.reasoning) : null; } catch(e) {}
+  const hasBase = detail?.matched_base?.length > 0;
+  const hasExpert = detail?.matched_expert?.length > 0;
+  const hasMissing = detail?.missing?.length > 0;
+  if (detail && (hasBase || hasExpert || hasMissing)) {
+    let html = '';
+    if (hasBase) {
+      html += `<div style="margin-bottom:8px"><span style="font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:0.05em">✓ Base skills matched</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.matched_base.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:var(--green-bg);color:var(--green);font-family:var(--mono)">${_esc(kw)}</span>`; });
+      html += `</div></div>`;
+    }
+    if (hasExpert) {
+      html += `<div style="margin-bottom:8px"><span style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em">✓ Expert skills matched</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.matched_expert.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">${_esc(kw)}</span>`; });
+      html += `</div></div>`;
+    }
+    if (hasMissing) {
+      html += `<div><span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:0.05em">✗ In job but not in your CV</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.missing.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;background:var(--red-bg);color:var(--red);font-family:var(--mono)">${_esc(kw)}</span>`; });
+      html += `</div></div>`;
+    }
+    breakdownEl.innerHTML = html;
+    breakdownEl.style.display = '';
+  } else {
+    breakdownEl.style.display = 'none';
+  }
+
+  // Description
+  const desc = j.description || '';
+  if (desc) {
+    document.getElementById('panel-desc').innerHTML = formatDescription(desc);
+    document.getElementById('panel-desc').style.display = '';
+    document.getElementById('panel-no-desc').style.display = 'none';
+  } else {
+    document.getElementById('panel-desc').style.display = 'none';
+    document.getElementById('panel-no-desc').style.display = '';
+  }
+
+  // Link
+  const linkEl = document.getElementById('panel-link');
+  if (j.url) { linkEl.href = j.url; linkEl.style.display = ''; }
+  else { linkEl.style.display = 'none'; }
+
+  // Decision button
+  document.getElementById('panel-decision-btn').textContent = j.decision ? 'Override decision' : 'Set decision';
+
+  document.getElementById('job-panel-overlay').style.display = '';
+  const panel = document.getElementById('job-panel');
+  panel.style.display = 'flex';
+  requestAnimationFrame(() => panel.style.transform = 'translateX(0)');
+}
+
+function closeJobPanel() {
+  const panel = document.getElementById('job-panel');
+  panel.style.transform = 'translateX(100%)';
+  setTimeout(() => {
+    panel.style.display = 'none';
+    document.getElementById('job-panel-overlay').style.display = 'none';
+  }, 220);
+  _panelJobId = null;
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJobPanel(); });
+
+// ── Decision modal ───────────────────────────────────────────────────────────
+function openDecisionFromPanel() {
+  if (!_panelJobId) return;
+  const j = _jobById[_panelJobId];
+  openDecision(_panelJobId, j?.decision || '', j?.decision_reason || '');
+}
+
+function openDecision(jobId, currentDecision, currentReason) {
+  document.getElementById('modal-job-id').value = jobId;
+  document.getElementById('modal-decision').value = currentDecision;
+  document.getElementById('modal-reason').value = currentReason || '';
+  toggleReasonField();
+  document.getElementById('decision-modal').style.display = 'flex';
+}
+
+function closeDecision() {
+  document.getElementById('decision-modal').style.display = 'none';
+}
+
+function toggleReasonField() {
+  const dec = document.getElementById('modal-decision').value;
+  document.getElementById('reason-group').style.display = dec === 'skipped' ? '' : 'none';
+}
+
+async function saveDecision() {
+  const jobId = document.getElementById('modal-job-id').value;
+  const decision = document.getElementById('modal-decision').value;
+  const reason = document.getElementById('modal-reason').value;
+  const body = new FormData();
+  if (decision) body.append('decision', decision);
+  if (reason) body.append('reason', reason);
+  await fetch(`/api/decisions/${jobId}`, { method: 'POST', body });
+  // Update in-memory job so panel reflects new decision without reload
+  const j = _jobById[jobId];
+  if (j) { j.decision = decision || null; j.decision_reason = reason || null; }
+  closeDecision();
+  showToast('Decision saved.');
+  filterJobs(); // re-render table to reflect updated status badge
+}
+
+document.getElementById('decision-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeDecision();
+});
+
 // Init
 filterJobs();
 </script>
+
+<!-- Job description side panel -->
+<div id="job-panel-overlay" onclick="closeJobPanel()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900"></div>
+<div id="job-panel"
+     style="display:none;position:fixed;top:0;right:0;bottom:0;width:480px;max-width:100vw;
+            background:var(--surface);border-left:1px solid var(--border);z-index:901;
+            display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.22s ease">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:20px 20px 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div style="flex:1;min-width:0;padding-right:12px">
+      <div id="panel-title" style="font-size:15px;font-weight:700;color:var(--fg);line-height:1.4;margin-bottom:4px"></div>
+      <a id="panel-company" href="#" style="font-size:12px;color:var(--accent);text-decoration:none;display:block;margin-bottom:4px"></a>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span id="panel-score"></span>
+        <span id="panel-location" style="font-size:12px;color:var(--muted-fg)"></span>
+      </div>
+    </div>
+    <button onclick="closeJobPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted-fg);padding:2px;flex-shrink:0;font-size:18px;line-height:1">✕</button>
+  </div>
+  <div id="panel-match-breakdown" style="display:none;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0"></div>
+  <div style="flex:1;overflow-y:auto;padding:20px">
+    <div id="panel-desc-wrap">
+      <div id="panel-desc" style="font-size:13px;color:var(--fg);line-height:1.7"></div>
+      <div id="panel-no-desc" style="display:none;font-size:13px;color:var(--muted-fg);font-style:italic">No description available yet. Run "Fetch Descriptions" to populate.</div>
+    </div>
+  </div>
+  <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0">
+    <a id="panel-link" href="#" target="_blank" rel="noreferrer" class="btn" style="font-size:12px;padding:6px 14px">View Job ↗</a>
+    <button id="panel-decision-btn" onclick="openDecisionFromPanel()" class="btn-outline" style="font-size:12px;padding:6px 14px">Set decision</button>
+  </div>
+</div>
+
+<!-- Decision modal -->
+<div id="decision-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;width:380px;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.3)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:16px">Set Decision</div>
+    <input type="hidden" id="modal-job-id">
+    <div style="margin-bottom:14px">
+      <label class="form-label">Decision</label>
+      <select id="modal-decision" onchange="toggleReasonField()" class="form-input">
+        <option value="">No decision</option>
+        <option value="interested">Interested</option>
+        <option value="applied">Applied</option>
+        <option value="skipped">Skipped</option>
+      </select>
+    </div>
+    <div id="reason-group" style="display:none;margin-bottom:14px">
+      <label class="form-label">Reason for skipping</label>
+      <select id="modal-reason" class="form-input">
+        <option value="">Select reason…</option>
+        <option>Salary too low</option>
+        <option>Location mismatch</option>
+        <option>Not a good culture fit</option>
+        <option>Too senior</option>
+        <option>Too junior</option>
+        <option>Prefer remote</option>
+        <option>Stack mismatch</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeDecision()" class="btn-outline">Cancel</button>
+      <button onclick="saveDecision()" class="btn">Save</button>
+    </div>
+  </div>
+</div>
 {% endblock %}

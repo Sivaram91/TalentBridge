@@ -536,11 +536,10 @@ function applyFilters() {
   saveFilters();
   const st      = document.getElementById('status-filter').value;
   const searchQ = document.getElementById('search').value.trim();
+  const levelOthers   = activeLevel.has('__others__');
+  const profileOthers = activeProfile.has('__others__');
   const filtersActive = !!(searchQ || activeCountries.size || activeLocs.size || st !== 'all' || activeLevel.size || activeProfile.size);
   const chipFiltersActive = !!(activeCountries.size || activeLocs.size || activeLevel.size || activeProfile.size || levelOthers || profileOthers);
-
-  const levelOthers  = activeLevel.has('__others__');
-  const profileOthers = activeProfile.has('__others__');
   const levelKws   = [...activeLevel].filter(v => v !== '__others__').flatMap(v => LEVEL_KEYWORDS[v] || []);
   const profileKws = [...activeProfile].filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
   const threshold  = {{ threshold|default(50) }};
@@ -592,20 +591,10 @@ function applyFilters() {
     }
   });
 
-  // When no filters at all, reset counts to originals
+  // When no filters at all, restore original counts and show all cards
   if (!filtersActive) {
     cards.forEach(card => {
       card.style.display = '';
-      const cid = card.href.split('/').pop();
-      const activeEl  = document.getElementById('active-count-'  + cid);
-      const matchedEl = document.getElementById('matched-count-' + cid);
-      if (activeEl)  activeEl.textContent  = card.dataset.totalActive || 0;
-      const jobs = JSON.parse(card.dataset.jobs || '[]');
-      const mc = jobs.filter(j => j.score >= threshold).length;
-      if (matchedEl) {
-        matchedEl.textContent = mc;
-        matchedEl.style.color = mc > 0 ? 'var(--green)' : 'var(--muted-fg)';
-      }
     });
     shownCompanies = cards.length;
     totalActive    = [...cards].reduce((s,c) => s + parseInt(c.dataset.totalActive||0,10), 0);

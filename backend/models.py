@@ -229,9 +229,10 @@ def get_all_active_jobs():
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT j.id, j.title, j.location, j.url, j.first_seen, j.posted_date,
+                   j.description,
                    c.id AS company_id, c.name AS company_name,
                    m.match_score, m.reasoning,
-                   d.decision
+                   d.decision, d.reason AS decision_reason
             FROM jobs j
             JOIN companies c ON c.id = j.company_id
             LEFT JOIN matches   m ON m.job_id = j.id

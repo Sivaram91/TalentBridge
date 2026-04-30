@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from backend.skill_taxonomy import build_taxonomy, get_taxonomy, _heuristic_hit_rate, _merge; print\\('import ok'\\)\")",
+      "Bash(python -c \"from backend import scraper, matcher, models, api, scheduler, main; print\\('All imports OK'\\)\")",
+      "Bash(git commit -m ' *)",
+      "Bash(python -c \"from backend.api import app; print\\('OK'\\)\")",
+      "Bash(python -c \"from backend.models import upsert_job; print\\('OK'\\)\")",
+      "Bash(python -c \"from backend.api import app; from fastapi.testclient import TestClient; c = TestClient\\(app\\); r = c.get\\('/jobs'\\); print\\('Status:', r.status_code\\); r2 = c.get\\('/companies'\\); print\\('Companies status:', r2.status_code\\)\")",
+      "Bash(python -c \"from backend.scraper import _fetch_all_descriptions; print\\('OK'\\)\")"
+    ]
+  }
+}

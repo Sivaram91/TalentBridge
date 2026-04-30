@@ -346,9 +346,11 @@ function applyGlobalFilters() {
 
     if (!searchOk || !chipOk) {
       row.dataset.filterHidden = '1';
+      row.style.display = 'none';
       hiddenCount++;
     } else {
       row.dataset.filterHidden = '0';
+      row.style.display = '';
     }
   });
 

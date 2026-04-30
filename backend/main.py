@@ -13,8 +13,25 @@ logger = logging.getLogger(__name__)
 PORT = 7070
 
 
+class _SuppressCancelledError(logging.Filter):
+    """Drop 'Exception in ASGI application' records caused by CancelledError on shutdown."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "Exception in ASGI application" in msg:
+            return False
+        exc = record.exc_info
+        if exc and exc[1] is not None:
+            import asyncio as _a
+            if isinstance(exc[1], (_a.CancelledError, KeyboardInterrupt)):
+                return False
+        return True
+
+
 def run_server():
     from .api import app
+    # Suppress CancelledError shutdown noise from uvicorn's ASGI error reporter
+    for _name in ("uvicorn.error", "uvicorn"):
+        logging.getLogger(_name).addFilter(_SuppressCancelledError())
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

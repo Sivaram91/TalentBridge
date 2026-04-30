@@ -869,7 +869,6 @@ function btnBusy(btn, label) {
   };
 }
 </script>
-{% block extra_scripts %}{% endblock %}
 <script>
 // ── Shared filter constants (used by companies + company_detail + jobs) ───────
 
@@ -1046,5 +1045,6 @@ function titleMatchesAnyProfile(title) {
   return _ALL_PROFILE_RES.some(re => re.test(title));
 }
 </script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

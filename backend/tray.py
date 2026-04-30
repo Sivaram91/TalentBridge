@@ -60,4 +60,4 @@ def run_tray():
     )
 
     icon = pystray.Icon("TalentBridge", img, "TalentBridge", menu)
-    icon.run()
+    icon.run_detached()
