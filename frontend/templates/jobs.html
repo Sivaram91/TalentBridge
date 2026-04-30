@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% block title %} — Jobs{% endblock %}
+{% block breadcrumb %}Jobs{% endblock %}
+
+{% block extra_styles %}
+<style>
+.jobs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  max-width: 340px;
+}
+
+.search-wrap svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--muted-fg);
+}
+
+.search-input {
+  width: 100%;
+  padding: 7px 12px 7px 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: var(--sans);
+  color: var(--fg);
+  background: var(--surface);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus { border-color: var(--accent); }
+
+.filter-select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: var(--sans);
+  color: var(--fg);
+  background: var(--surface);
+  outline: none;
+  cursor: pointer;
+}
+
+.filter-select:focus { border-color: var(--accent); }
+
+.jobs-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.jobs-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.jobs-table th:hover { color: var(--fg); }
+
+.jobs-table th .sort-icon {
+  display: inline-block;
+  margin-left: 4px;
+  opacity: 0.4;
+  font-size: 10px;
+}
+
+.jobs-table th.sort-asc .sort-icon::after  { content: '↑'; opacity: 1; }
+.jobs-table th.sort-desc .sort-icon::after { content: '↓'; opacity: 1; }
+.jobs-table th:not(.sort-asc):not(.sort-desc) .sort-icon::after { content: '↕'; }
+
+.jobs-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.jobs-table tr:last-child td { border-bottom: none; }
+
+.jobs-table tr:hover td { background: var(--surface-2); }
+
+.job-title-link {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.job-title-link:hover { color: var(--accent); text-decoration: underline; }
+
+.company-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--muted-fg);
+  text-decoration: none;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.company-pill:hover { color: var(--accent); background: var(--accent-bg); }
+
+.empty-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--muted-fg);
+}
+
+.empty-state svg { margin-bottom: 12px; opacity: 0.3; }
+.empty-state p { font-size: 14px; }
+
+#row-count {
+  font-size: 12px;
+  color: var(--muted-fg);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.decision-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  display: inline-block; flex-shrink: 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <div class="screen-title">All Jobs</div>
+      <div class="screen-sub">{{ jobs | length }} active jobs across {{ companies | length }} companies</div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="jobs-toolbar">
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <input id="search-input" class="search-input" type="text" placeholder="Search jobs…" oninput="filterJobs()">
+    </div>
+
+    <select id="company-filter" class="filter-select" onchange="filterJobs()">
+      <option value="">All Companies</option>
+      {% for c in companies | sort(attribute='name') %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+
+    <select id="score-filter" class="filter-select" onchange="filterJobs()">
+      <option value="">Any Score</option>
+      <option value="75">≥ 75%</option>
+      <option value="50">≥ 50%</option>
+      <option value="25">≥ 25%</option>
+      <option value="-1">Unscored</option>
+    </select>
+
+    <select id="decision-filter" class="filter-select" onchange="filterJobs()">
+      <option value="">Any Status</option>
+      <option value="none">Undecided</option>
+      <option value="interested">Interested</option>
+      <option value="applied">Applied</option>
+      <option value="skipped">Skipped</option>
+    </select>
+
+    <span id="row-count"></span>
+  </div>
+
+  <!-- Table -->
+  <div class="jobs-table-wrap">
+    <table class="jobs-table" id="jobs-table">
+      <thead>
+        <tr>
+          <th onclick="sortBy('title')" data-col="title">Title <span class="sort-icon"></span></th>
+          <th onclick="sortBy('company')" data-col="company">Company <span class="sort-icon"></span></th>
+          <th onclick="sortBy('location')" data-col="location">Location <span class="sort-icon"></span></th>
+          <th onclick="sortBy('score')" data-col="score" class="sort-desc">Score <span class="sort-icon"></span></th>
+          <th>Status</th>
+          <th onclick="sortBy('first_seen')" data-col="first_seen">Added <span class="sort-icon"></span></th>
+        </tr>
+      </thead>
+      <tbody id="jobs-tbody"></tbody>
+    </table>
+    <div id="empty-state" class="empty-state" style="display:none">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+        <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <p>No jobs match your filters</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const ALL_JOBS = {{ jobs | tojson }};
+
+const DECISION_META = {
+  'interested': { label: 'Interested', color: 'var(--blue)',  bg: 'var(--blue-bg)' },
+  'applied':    { label: 'Applied',    color: 'var(--teal)',  bg: 'var(--teal-bg)' },
+  'skipped':    { label: 'Skipped',    color: 'var(--muted-fg)', bg: 'var(--surface-2)' },
+};
+
+function scoreClass(score) {
+  if (score === null || score < 0) return 'badge-muted';
+  if (score >= 75) return 'badge-green';
+  if (score >= 50) return 'badge-amber';
+  return 'badge-muted';
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+let _sortCol = 'score';
+let _sortDir = -1; // -1 = desc, 1 = asc
+
+function sortBy(col) {
+  if (_sortCol === col) {
+    _sortDir = -_sortDir;
+  } else {
+    _sortCol = col;
+    _sortDir = col === 'score' ? -1 : 1;
+  }
+  // Update header classes
+  document.querySelectorAll('.jobs-table th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === col) th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+  filterJobs();
+}
+
+function filterJobs() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  const companyId = document.getElementById('company-filter').value;
+  const scoreMin = document.getElementById('score-filter').value;
+  const decisionF = document.getElementById('decision-filter').value;
+
+  let rows = ALL_JOBS.filter(j => {
+    if (companyId && String(j.company_id) !== companyId) return false;
+    if (scoreMin === '-1') {
+      if (j.match_score !== null && j.match_score >= 0) return false;
+    } else if (scoreMin) {
+      if ((j.match_score ?? -1) < parseInt(scoreMin)) return false;
+    }
+    if (decisionF === 'none') {
+      if (j.decision) return false;
+    } else if (decisionF && j.decision !== decisionF) {
+      return false;
+    }
+    if (q) {
+      const hay = `${j.title} ${j.company_name} ${j.location || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Sort
+  rows.sort((a, b) => {
+    let av, bv;
+    if (_sortCol === 'score') {
+      av = a.match_score ?? -1; bv = b.match_score ?? -1;
+    } else if (_sortCol === 'title') {
+      av = (a.title || '').toLowerCase(); bv = (b.title || '').toLowerCase();
+    } else if (_sortCol === 'company') {
+      av = (a.company_name || '').toLowerCase(); bv = (b.company_name || '').toLowerCase();
+    } else if (_sortCol === 'location') {
+      av = (a.location || '').toLowerCase(); bv = (b.location || '').toLowerCase();
+    } else if (_sortCol === 'first_seen') {
+      av = a.first_seen || ''; bv = b.first_seen || '';
+    }
+    if (av < bv) return -_sortDir;
+    if (av > bv) return _sortDir;
+    return 0;
+  });
+
+  renderRows(rows);
+  document.getElementById('row-count').textContent = `${rows.length} job${rows.length !== 1 ? 's' : ''}`;
+}
+
+function renderRows(rows) {
+  const tbody = document.getElementById('jobs-tbody');
+  const empty = document.getElementById('empty-state');
+
+  if (!rows.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  tbody.innerHTML = rows.map(j => {
+    const score = j.match_score;
+    const scoreBadge = score !== null && score >= 0
+      ? `<span class="badge-score ${scoreClass(score)}">${score}%</span>`
+      : `<span style="color:var(--muted-fg);font-size:12px">—</span>`;
+
+    const titleCell = j.url
+      ? `<a class="job-title-link" href="${j.url}" target="_blank" rel="noopener">${_esc(j.title)}</a>`
+      : `<span class="job-title-link" style="cursor:default">${_esc(j.title)}</span>`;
+
+    const companyCell = `<a class="company-pill" href="/companies/${j.company_id}">${_esc(j.company_name)}</a>`;
+
+    const loc = j.location ? _esc(j.location) : `<span style="color:var(--muted-fg)">—</span>`;
+
+    let statusCell = `<span style="color:var(--muted-fg);font-size:12px">—</span>`;
+    if (j.decision && DECISION_META[j.decision]) {
+      const m = DECISION_META[j.decision];
+      statusCell = `<span class="badge" style="background:${m.bg};color:${m.color}">${m.label}</span>`;
+    }
+
+    return `<tr>
+      <td style="max-width:320px">${titleCell}</td>
+      <td>${companyCell}</td>
+      <td style="color:var(--muted-fg);font-size:12px">${loc}</td>
+      <td>${scoreBadge}</td>
+      <td>${statusCell}</td>
+      <td style="color:var(--muted-fg);font-size:12px;white-space:nowrap">${fmtDate(j.first_seen)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Init
+filterJobs();
+</script>
+{% endblock %}

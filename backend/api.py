@@ -15,7 +15,7 @@ from .db import get_conn
 from .models import (
     get_all_companies, get_company, get_jobs_for_company,
     get_latest_cv, save_cv, set_extra_keywords, set_keyword_types,
-    get_all_decided_jobs, save_decision,
+    get_all_decided_jobs, get_all_active_jobs, save_decision,
     set_match_override,
     get_setting, set_setting, ensure_settings_table,
     get_scrape_log,
@@ -113,6 +113,19 @@ async def company_detail(request: Request, company_id: int):
         "scrape_log": scrape_log,
         "threshold": threshold,
         "active_nav": "companies",
+    })
+
+
+# ── Jobs (all companies) ──────────────────────────────────────────────────────
+
+@app.get("/jobs", response_class=HTMLResponse)
+async def jobs_page(request: Request):
+    jobs = get_all_active_jobs()
+    companies = get_all_companies()
+    return _tr(request, "jobs.html", {
+        "jobs": jobs,
+        "companies": companies,
+        "active_nav": "jobs",
     })
 
 
