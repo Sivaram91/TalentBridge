@@ -226,7 +226,7 @@
 </div>
 
 <script>
-const ALL_JOBS = {{ jobs | tojson }};
+const ALL_JOBS = {{ jobs | tojson | safe }};
 
 const DECISION_META = {
   'interested': { label: 'Interested', color: 'var(--blue)',  bg: 'var(--blue-bg)' },
