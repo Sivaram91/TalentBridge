@@ -531,24 +531,50 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                         continue
                     if isinstance(desc, str) and desc:
                         stored = conn.execute("SELECT title, location, posted_date FROM jobs WHERE id=?", (job["id"],)).fetchone()
-                        loc = stored["location"] or ""
+                        existing_loc = stored["location"] or ""
+                        is_vague = bool(re.match(r"^\d+\s+locations?$", existing_loc, re.IGNORECASE))
 
                         # Extract posted date from description (only set if not already known)
                         posted_date = stored["posted_date"] if stored["posted_date"] else extract_posted_date(desc)
 
-                        if not loc or re.match(r"^\d+\s+locations?$", loc, re.IGNORECASE):
-                            extracted = extract_location_from_description(stored["title"] or "", desc)
-                            if extracted:
-                                country = resolve_country(extracted)
-                                conn.execute(
-                                    "UPDATE jobs SET description=?, location=?, country=?, posted_date=? WHERE id=?",
-                                    (desc, extracted, country, posted_date, job["id"])
-                                )
+                        # Always attempt location extraction from description
+                        extracted_loc = extract_location_from_description(stored["title"] or "", desc)
+
+                        final_loc = existing_loc
+                        final_country = None  # None = don't update country
+
+                        if extracted_loc:
+                            if not existing_loc or is_vague:
+                                # No prior location — use extracted
+                                final_loc = extracted_loc
+                                final_country = resolve_country(extracted_loc)
                             else:
-                                conn.execute(
-                                    "UPDATE jobs SET description=?, posted_date=? WHERE id=?",
-                                    (desc, posted_date, job["id"])
-                                )
+                                # Both exist — compare normalised (lowercase, strip)
+                                norm_existing = existing_loc.strip().lower()
+                                norm_extracted = extracted_loc.strip().lower()
+                                # Consider a match if either contains the other
+                                # (e.g. "Munich" vs "Munich, Bavaria")
+                                if norm_existing != norm_extracted and \
+                                   norm_extracted not in norm_existing and \
+                                   norm_existing not in norm_extracted:
+                                    logger.warning(
+                                        "Location mismatch job %s '%s': listing says %r, "
+                                        "description says %r — overriding with description",
+                                        job["id"], stored["title"] or "", existing_loc, extracted_loc
+                                    )
+                                    final_loc = extracted_loc
+                                    final_country = resolve_country(extracted_loc)
+
+                        if final_country is not None:
+                            conn.execute(
+                                "UPDATE jobs SET description=?, location=?, country=?, posted_date=? WHERE id=?",
+                                (desc, final_loc, final_country, posted_date, job["id"])
+                            )
+                        elif final_loc != existing_loc:
+                            conn.execute(
+                                "UPDATE jobs SET description=?, location=?, posted_date=? WHERE id=?",
+                                (desc, final_loc, posted_date, job["id"])
+                            )
                         else:
                             conn.execute(
                                 "UPDATE jobs SET description=?, posted_date=? WHERE id=?",
