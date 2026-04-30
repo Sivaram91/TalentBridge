@@ -228,7 +228,7 @@ def mark_expired_jobs(company_id: int, seen_titles: list[str]):
 def get_all_active_jobs():
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT j.id, j.title, j.location, j.url, j.first_seen,
+            SELECT j.id, j.title, j.location, j.url, j.first_seen, j.posted_date,
                    c.id AS company_id, c.name AS company_name,
                    m.match_score, m.reasoning,
                    d.decision

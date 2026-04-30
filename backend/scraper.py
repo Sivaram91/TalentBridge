@@ -2,8 +2,9 @@
 import asyncio
 import json
 import logging
+import re
 import time
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 import httpx
@@ -23,6 +24,99 @@ def _safe_task(coro, name: str = "task"):
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = [30, 120, 300]
+
+# ── Posted date extraction ────────────────────────────────────────────────────
+
+_MONTH_MAP = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+    'january': 1, 'february': 2, 'march': 3, 'april': 4, 'june': 6,
+    'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+}
+
+# Patterns tried in order — first match wins
+_DATE_PATTERNS = [
+    # ISO: 2024-11-25 or 2024/11/25
+    (re.compile(r'\b(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])\b'), 'ymd'),
+    # US: 11/25/2024 or 11-25-2024
+    (re.compile(r'\b(0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])[-/](20\d{2})\b'), 'mdy'),
+    # EU: 25.11.2024 or 25/11/2024
+    (re.compile(r'\b(0?[1-9]|[12]\d|3[01])[./](0?[1-9]|1[0-2])[./](20\d{2})\b'), 'dmy'),
+    # "25 November 2024" or "November 25, 2024" or "25 Nov 2024"
+    (re.compile(r'\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20\d{2})\b', re.I), 'dmy_text'),
+    (re.compile(r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b', re.I), 'mdy_text'),
+]
+
+# Labels that must appear near the date for it to be considered a posted date
+_POSTED_LABELS = re.compile(
+    r'(posted|published|date posted|job posted|veröffentlicht|eingestellt am|created|listing date|date added|start date)\s*[:\-–]?\s*$',
+    re.I
+)
+
+# Labels that indicate it's NOT a posted date (application deadline etc.)
+_EXCLUDE_LABELS = re.compile(
+    r'(deadline|apply by|closing date|expir|valid until|bewerbungsschluss)',
+    re.I
+)
+
+
+def extract_posted_date(text: str) -> str | None:
+    """
+    Scan description text for a posting date.
+    Returns ISO date string 'YYYY-MM-DD' or None.
+    Only accepts dates that are plausibly a posted date (labelled or in first 500 chars).
+    Rejects future dates and dates older than 2 years.
+    """
+    today = date.today()
+    min_date = date(today.year - 2, today.month, today.day)
+
+    lines = text.splitlines()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _EXCLUDE_LABELS.search(stripped):
+            continue
+
+        for pattern, fmt in _DATE_PATTERNS:
+            m = pattern.search(stripped)
+            if not m:
+                continue
+            try:
+                if fmt == 'ymd':
+                    y, mo, d_ = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                elif fmt == 'mdy':
+                    mo, d_, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                elif fmt == 'dmy':
+                    d_, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                elif fmt == 'dmy_text':
+                    d_, mo_str, y = int(m.group(1)), m.group(2).lower()[:3], int(m.group(3))
+                    mo = _MONTH_MAP.get(mo_str)
+                    if not mo:
+                        continue
+                elif fmt == 'mdy_text':
+                    mo_str, d_, y = m.group(1).lower()[:3], int(m.group(2)), int(m.group(3))
+                    mo = _MONTH_MAP.get(mo_str)
+                    if not mo:
+                        continue
+                else:
+                    continue
+
+                parsed = date(y, mo, d_)
+            except ValueError:
+                continue
+
+            # Reject future dates and very old dates
+            if parsed > today or parsed < min_date:
+                continue
+
+            # Accept if: line has a posted label, OR date is in the first 500 chars of text
+            before = stripped[:m.start()]
+            if _POSTED_LABELS.search(before) or text.find(stripped) < 500:
+                return parsed.isoformat()
+
+    return None
 
 _HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -436,21 +530,30 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                         _desc_fetch_done = min(_desc_fetch_done + 1, _desc_fetch_total)
                         continue
                     if isinstance(desc, str) and desc:
-                        stored = conn.execute("SELECT title, location FROM jobs WHERE id=?", (job["id"],)).fetchone()
+                        stored = conn.execute("SELECT title, location, posted_date FROM jobs WHERE id=?", (job["id"],)).fetchone()
                         loc = stored["location"] or ""
-                        import re as _re
-                        if not loc or _re.match(r"^\d+\s+locations?$", loc, _re.IGNORECASE):
+
+                        # Extract posted date from description (only set if not already known)
+                        posted_date = stored["posted_date"] if stored["posted_date"] else extract_posted_date(desc)
+
+                        if not loc or re.match(r"^\d+\s+locations?$", loc, re.IGNORECASE):
                             extracted = extract_location_from_description(stored["title"] or "", desc)
                             if extracted:
                                 country = resolve_country(extracted)
                                 conn.execute(
-                                    "UPDATE jobs SET description=?, location=?, country=? WHERE id=?",
-                                    (desc, extracted, country, job["id"])
+                                    "UPDATE jobs SET description=?, location=?, country=?, posted_date=? WHERE id=?",
+                                    (desc, extracted, country, posted_date, job["id"])
                                 )
                             else:
-                                conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
+                                conn.execute(
+                                    "UPDATE jobs SET description=?, posted_date=? WHERE id=?",
+                                    (desc, posted_date, job["id"])
+                                )
                         else:
-                            conn.execute("UPDATE jobs SET description=? WHERE id=?", (desc, job["id"]))
+                            conn.execute(
+                                "UPDATE jobs SET description=?, posted_date=? WHERE id=?",
+                                (desc, posted_date, job["id"])
+                            )
                         total_saved += 1
                     # Cap at total to avoid counter exceeding 100%
                     _desc_fetch_done = min(_desc_fetch_done + 1, _desc_fetch_total)

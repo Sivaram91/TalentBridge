@@ -33,6 +33,8 @@ def _migrate(conn):
     jobs_existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
     if "country" not in jobs_existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN country TEXT NOT NULL DEFAULT ''")
+    if "posted_date" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN posted_date TEXT")
 
     cv_existing = {row[1] for row in conn.execute("PRAGMA table_info(cv)")}
     if "extra_keywords_json" not in cv_existing:
@@ -80,6 +82,7 @@ def init_db():
             location    TEXT,
             first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
             last_seen   TEXT NOT NULL DEFAULT (datetime('now')),
+            posted_date TEXT,
             is_expired  INTEGER NOT NULL DEFAULT 0
         );
 

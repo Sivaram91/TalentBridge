@@ -210,7 +210,7 @@
           <th onclick="sortBy('location')" data-col="location">Location <span class="sort-icon"></span></th>
           <th onclick="sortBy('score')" data-col="score" class="sort-desc">Score <span class="sort-icon"></span></th>
           <th>Status</th>
-          <th onclick="sortBy('first_seen')" data-col="first_seen">Added <span class="sort-icon"></span></th>
+          <th onclick="sortBy('date')" data-col="date">Posted <span class="sort-icon"></span></th>
         </tr>
       </thead>
       <tbody id="jobs-tbody"></tbody>
@@ -301,8 +301,8 @@ function filterJobs() {
       av = (a.company_name || '').toLowerCase(); bv = (b.company_name || '').toLowerCase();
     } else if (_sortCol === 'location') {
       av = (a.location || '').toLowerCase(); bv = (b.location || '').toLowerCase();
-    } else if (_sortCol === 'first_seen') {
-      av = a.first_seen || ''; bv = b.first_seen || '';
+    } else if (_sortCol === 'date') {
+      av = a.posted_date || a.first_seen || ''; bv = b.posted_date || b.first_seen || '';
     }
     if (av < bv) return -_sortDir;
     if (av > bv) return _sortDir;
@@ -350,7 +350,12 @@ function renderRows(rows) {
       <td style="color:var(--muted-fg);font-size:12px">${loc}</td>
       <td>${scoreBadge}</td>
       <td>${statusCell}</td>
-      <td style="color:var(--muted-fg);font-size:12px;white-space:nowrap">${fmtDate(j.first_seen)}</td>
+      <td style="color:var(--muted-fg);font-size:12px;white-space:nowrap">
+        ${j.posted_date
+          ? `<span title="Posted date from job description">${fmtDate(j.posted_date)}</span>`
+          : `<span title="Date first seen by TalentBridge" style="opacity:0.6">${fmtDate(j.first_seen)}</span>`
+        }
+      </td>
     </tr>`;
   }).join('');
 }
