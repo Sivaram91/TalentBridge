@@ -189,6 +189,21 @@
       <option value="-1">Unscored</option>
     </select>
 
+    <select id="profile-filter" class="filter-select" onchange="filterJobs()">
+      <option value="">Any Role</option>
+      <option value="Software Developer">Software Developer</option>
+      <option value="Software Architect">Software Architect</option>
+      <option value="Test Engineer">Test Engineer</option>
+      <option value="Systems Engineer">Systems Engineer</option>
+      <option value="Product Owner">Product Owner</option>
+      <option value="Scrum Master">Scrum Master</option>
+      <option value="Quality Engineer">Quality Engineer</option>
+      <option value="Project Manager">Project Manager</option>
+      <option value="DevOps / Cloud">DevOps / Cloud</option>
+      <option value="Data / ML / AI">Data / ML / AI</option>
+      <option value="__others__">Others</option>
+    </select>
+
     <select id="decision-filter" class="filter-select" onchange="filterJobs()">
       <option value="">Any Status</option>
       <option value="none">Undecided</option>
@@ -265,10 +280,20 @@ function sortBy(col) {
   filterJobs();
 }
 
+function _matchesProfile(title, profileVal) {
+  const t = title.toLowerCase();
+  if (profileVal === '__others__') {
+    return !ALL_PROFILE_KWS.some(kw => t.includes(kw));
+  }
+  const kws = PROFILE_KEYWORDS[profileVal] || [];
+  return kws.some(kw => t.includes(kw));
+}
+
 function filterJobs() {
   const q = document.getElementById('search-input').value.trim().toLowerCase();
   const companyId = document.getElementById('company-filter').value;
   const scoreMin = document.getElementById('score-filter').value;
+  const profileF = document.getElementById('profile-filter').value;
   const decisionF = document.getElementById('decision-filter').value;
 
   let rows = ALL_JOBS.filter(j => {
@@ -278,6 +303,7 @@ function filterJobs() {
     } else if (scoreMin) {
       if ((j.match_score ?? -1) < parseInt(scoreMin)) return false;
     }
+    if (profileF && !_matchesProfile(j.title, profileF)) return false;
     if (decisionF === 'none') {
       if (j.decision) return false;
     } else if (decisionF && j.decision !== decisionF) {

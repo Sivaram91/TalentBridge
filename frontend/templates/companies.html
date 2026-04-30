@@ -136,7 +136,7 @@
   <!-- Profile chips -->
   <div style="display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
     <span style="font-size:11px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px">Profile</span>
-    {% for profile in ['Developer','Engineer','Architect','Scrum Master','Project Manager','Product Manager','Designer','Data','DevOps','QA','Coordinator'] %}
+    {% for profile in ['Software Developer','Software Architect','Test Engineer','Systems Engineer','Product Owner','Scrum Master','Quality Engineer','Project Manager','DevOps / Cloud','Data / ML / AI'] %}
     <button class="chip" data-group="profile" data-value="{{ profile }}" onclick="toggleChip(this)">{{ profile }}</button>
     {% endfor %}
     <button class="chip" data-group="profile" data-value="__others__" onclick="toggleChip(this)">Others</button>
