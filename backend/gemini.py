@@ -126,31 +126,69 @@ async def _call_ai(prompt: str, temperature: float = 0.1) -> str:
 
 # ── CV keyword extraction ────────────────────────────────────────────────────
 
+_CV_CHUNK_SIZE = 12000   # chars per chunk — well within Groq's context window
+_CV_PROMPT = """Extract every concrete professional skill, technology, tool, and domain knowledge item from this CV text.
+
+KEEP: programming languages, frameworks, libraries, tools, protocols, standards, hardware platforms, certifications, domain-specific methodologies.
+DISCARD: soft skills, generic adjectives, personal details, company names, job titles, locations, dates.
+
+Use canonical short forms (e.g. "C++" not "proficiency in C++", "ISO 14229" not "ISO-14229 standard").
+Return ONLY a JSON array of strings. No explanation, no markdown.
+
+CV TEXT:
+{chunk}"""
+
+
+def _parse_keywords_json(raw: str) -> list[str]:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    result = json.loads(raw.strip())
+    if isinstance(result, list):
+        return [k.strip() for k in result if isinstance(k, str) and k.strip()]
+    return []
+
+
+async def _call_ai_with_retry(prompt: str, temperature: float = 0.0) -> str:
+    import asyncio
+    for attempt in range(5):
+        try:
+            return await _call_ai(prompt, temperature=temperature)
+        except GeminiRateLimitError as e:
+            wait = e.retry_after + 5
+            logger.info("CV extraction: rate limited, waiting %ds (attempt %d/5)…", wait, attempt + 1)
+            await asyncio.sleep(wait)
+    raise RuntimeError("CV extraction: gave up after 5 rate-limit retries")
+
+
 async def extract_cv_keywords(cv_text: str) -> list[str]:
-    prompt = f"""Extract the key professional skills, technologies, tools, and domain knowledge
-from this CV. Return ONLY a JSON array of strings — no explanation, no markdown, just the array.
-Limit to the 30 most important and specific keywords.
+    # Split into chunks only if CV exceeds one chunk size
+    chunks = [cv_text[i:i + _CV_CHUNK_SIZE] for i in range(0, len(cv_text), _CV_CHUNK_SIZE)]
+    logger.info("CV extraction: %d chunk(s) for %d chars", len(chunks), len(cv_text))
 
-CV:
-{cv_text[:6000]}
+    seen: set[str] = set()
+    keywords: list[str] = []
 
-Return format: ["Python", "Machine Learning", ...]"""
+    for idx, chunk in enumerate(chunks):
+        prompt = _CV_PROMPT.format(chunk=chunk)
+        try:
+            raw = await _call_ai_with_retry(prompt)
+            extracted = _parse_keywords_json(raw)
+            new = 0
+            for k in extracted:
+                if k.lower() not in seen:
+                    seen.add(k.lower())
+                    keywords.append(k)
+                    new += 1
+            logger.info("CV extraction: chunk %d/%d — %d new skills", idx + 1, len(chunks), new)
+        except Exception as e:
+            logger.error("CV extraction failed on chunk %d: %s", idx + 1, e)
 
-    try:
-        raw = await _call_ai(prompt)
-        raw = raw.strip()
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        keywords = json.loads(raw)
-        return [k for k in keywords if isinstance(k, str)]
-    except GeminiRateLimitError:
-        raise
-    except Exception as e:
-        logger.error("Keyword extraction failed: %s", e)
-        return []
+    logger.info("CV extraction: total %d skills extracted", len(keywords))
+    return keywords
 
 
 # ── Job extraction from HTML ─────────────────────────────────────────────────

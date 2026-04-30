@@ -11,69 +11,33 @@
     </div>
   </div>
 
-  <!-- Skill taxonomy card (full width) -->
-  <div style="max-width:860px;margin-bottom:20px">
-    <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
-      Skill Taxonomy
-    </div>
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px">
-          <div style="font-size:13px;color:var(--fg);margin-bottom:4px">
-            A curated list of job skills mined from all job descriptions and validated by AI.
-            Used to identify missing skills in job matching.
-          </div>
-          <div id="taxonomy-status" style="font-size:12px;color:var(--muted-fg);font-family:var(--mono)">
-            Loading…
-          </div>
-        </div>
-        <button id="taxonomy-btn" class="btn" onclick="buildTaxonomy()" style="font-size:12px;padding:6px 16px;flex-shrink:0">
-          Build Taxonomy
-        </button>
-      </div>
-      <div id="taxonomy-skills" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px;flex-wrap:wrap">
-          <div style="font-size:11px;color:var(--muted-fg)">Click skills to select, then delete selected</div>
-          <div id="taxonomy-action-bar" style="display:none;align-items:center;gap:8px">
-            <span id="taxonomy-sel-count" style="font-size:11px;color:var(--fg);font-family:var(--mono)"></span>
-            <button onclick="clearTaxonomySelection()" class="btn-ghost" style="font-size:11px;padding:3px 8px">Deselect all</button>
-            <button onclick="confirmDeleteSelected()" style="font-size:11px;padding:4px 12px;border-radius:6px;border:none;cursor:pointer;background:var(--red);color:#fff;font-weight:600">Delete selected</button>
-          </div>
-        </div>
-        <div id="taxonomy-skills-wrap" style="display:flex;flex-wrap:wrap;gap:4px"></div>
-      </div>
-    </div>
-  </div>
+  <!-- Row 1: CV upload + Additional skills (two equal boxes) -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-bottom:20px">
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:860px">
-    <!-- Left: current CV + upload -->
+    <!-- CV upload -->
     <div>
       <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">Current CV</div>
       <div class="card">
         {% if cv %}
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-          <div style="width:40px;height:48px;background:var(--accent-bg);border-radius:6px;display:flex;align-items:center;justify-content:center">
+          <div style="width:40px;height:48px;background:var(--accent-bg);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
             <svg width="18" height="20" viewBox="0 0 18 20" fill="none">
               <rect x="1" y="1" width="12" height="18" rx="2" stroke="var(--accent)" stroke-width="1.5"/>
               <path d="M4 6h6M4 9h6M4 12h4" stroke="var(--accent)" stroke-width="1.3" stroke-linecap="round"/>
               <path d="M13 1l4 4" stroke="var(--accent)" stroke-width="1.5"/>
             </svg>
           </div>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--fg)" id="cv-filename">CV uploaded</div>
-            <div style="font-size:11px;color:var(--muted-fg);margin-top:2px;font-family:var(--mono)" id="cv-date">
-              Last updated {{ cv.uploaded_at[:10] }}
-            </div>
+          <div style="min-width:0">
+            <div style="font-size:13px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="cv-filename">CV uploaded</div>
+            <div style="font-size:11px;color:var(--muted-fg);margin-top:2px;font-family:var(--mono)" id="cv-date">Last updated {{ cv.uploaded_at[:10] }}</div>
           </div>
-          <span id="cv-updated-tick" style="display:none;margin-left:auto;font-size:11px;color:var(--green);font-weight:600">✓ Updated</span>
+          <span id="cv-updated-tick" style="display:none;margin-left:auto;font-size:11px;color:var(--green);font-weight:600;flex-shrink:0">✓ Updated</span>
         </div>
         {% else %}
         <div style="margin-bottom:16px;padding:12px;background:var(--surface-2);border-radius:6px;font-size:13px;color:var(--muted-fg)">
           No CV uploaded yet. Upload one below to start matching.
         </div>
         {% endif %}
-
-        <!-- Drop zone -->
         <div class="upload-zone" id="drop-zone" onclick="document.getElementById('cv-file').click()">
           <input type="file" id="cv-file" accept=".pdf,.txt,.docx" style="display:none" onchange="handleFileSelect(this)">
           <div id="upload-idle">
@@ -89,63 +53,76 @@
       </div>
     </div>
 
-    <!-- Right: keywords -->
-    <div style="display:flex;flex-direction:column;gap:16px">
-      <!-- Legend -->
-      <div style="display:flex;align-items:center;gap:16px;font-size:11px;color:var(--muted-fg)">
-        <span>Click any skill to toggle its type:</span>
-        <span style="padding:2px 8px;border-radius:99px;background:var(--red-bg);color:var(--red);font-weight:600;font-size:11px">Base skill</span>
-        <span style="padding:2px 8px;border-radius:99px;background:var(--accent-bg);color:var(--accent);font-size:11px">Expert skill</span>
+    <!-- Additional skills -->
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
+        Additional Skills
+        <span style="font-size:10px;font-weight:400;color:var(--muted-fg)">(manually added)</span>
       </div>
-
-      <!-- CV keywords -->
-      <div>
-        <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
-          Extracted Skills
-          <span style="font-size:10px;font-weight:400" id="kw-count">({{ keywords | length }})</span>
+      <div class="card">
+        <div id="extra-wrap" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px"></div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <input id="extra-input" type="text" placeholder="e.g. Embedded C, AUTOSAR…"
+                 style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);
+                        background:var(--surface-2);color:var(--fg);font-size:13px;font-family:var(--mono)"
+                 onkeydown="handleExtraKey(event)">
+          <select id="extra-type" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);color:var(--fg);font-size:12px">
+            <option value="expert">Expert</option>
+            <option value="base">Base</option>
+          </select>
+          <button class="btn" onclick="addExtraKeyword()" style="font-size:12px;padding:6px 14px">Add</button>
         </div>
-        <div class="card">
-          <div id="keywords-wrap" style="display:flex;flex-wrap:wrap;gap:6px">
-            {% if keywords %}
-              {% for kw in keywords %}
-              <span class="skill-tag" data-skill="{{ kw | e }}" data-source="cv"
-                    style="cursor:pointer;user-select:none;padding:4px 10px;border-radius:99px;font-size:12px;font-weight:500;font-family:var(--mono)"
-                    onclick="toggleSkillType(this)">{{ kw }}</span>
-              {% endfor %}
-            {% else %}
-              <div style="color:var(--muted-fg);font-size:13px">Skills will appear here after CV upload.</div>
-            {% endif %}
-          </div>
-          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <span style="font-size:12px;color:var(--muted-fg)">Base skills guarantee a match; expert skills boost the score.</span>
-            <button class="btn" id="match-btn" onclick="runMatching()" style="font-size:12px;padding:6px 14px"{% if not keywords %} disabled{% endif %}>Run Matching</button>
-          </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted-fg)">
+          Merged with extracted skills during matching.
         </div>
       </div>
+    </div>
+  </div>
 
-      <!-- Extra / manual keywords -->
-      <div>
-        <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
-          Additional Skills
-          <span style="font-size:10px;font-weight:400;color:var(--muted-fg)">(manually added)</span>
-        </div>
-        <div class="card">
-          <div id="extra-wrap" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px"></div>
-          <div style="margin-top:12px;display:flex;gap:8px">
-            <input id="extra-input" type="text" placeholder="e.g. Embedded C, AUTOSAR…"
-                   style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);
-                          background:var(--surface-2);color:var(--fg);font-size:13px;font-family:var(--mono)"
-                   onkeydown="handleExtraKey(event)">
-            <select id="extra-type" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);color:var(--fg);font-size:12px">
-              <option value="expert">Expert</option>
-              <option value="base">Base</option>
-            </select>
-            <button class="btn" onclick="addExtraKeyword()" style="font-size:12px;padding:6px 14px">Add</button>
-          </div>
-          <div style="margin-top:10px;font-size:11px;color:var(--muted-fg)">
-            Merged with extracted skills during job matching.
-          </div>
-        </div>
+  <!-- Row 2: Extracted skills — full width -->
+  <div style="margin-bottom:24px">
+    <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
+      Extracted Skills
+      <span style="font-size:10px;font-weight:400" id="kw-count">({{ keywords | length }})</span>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--muted-fg)">Click any skill to toggle its type:</span>
+        <span style="padding:2px 8px;border-radius:99px;background:var(--red-bg);color:var(--red);font-weight:600;font-size:11px">Base — guaranteed match</span>
+        <span style="padding:2px 8px;border-radius:99px;background:var(--accent-bg);color:var(--accent);font-size:11px">Expert — score boost</span>
+      </div>
+      <div id="keywords-wrap" style="display:flex;flex-wrap:wrap;gap:6px">
+        {% if keywords %}
+          {% for kw in keywords %}
+          <span class="skill-tag" data-skill="{{ kw | e }}" data-source="cv"
+                style="cursor:pointer;user-select:none;padding:4px 10px;border-radius:99px;font-size:12px;font-weight:500;font-family:var(--mono)"
+                onclick="toggleSkillType(this)">{{ kw }}</span>
+          {% endfor %}
+        {% else %}
+          <div style="color:var(--muted-fg);font-size:13px">Skills will appear here after CV upload.</div>
+        {% endif %}
+      </div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end">
+        <button class="btn" id="match-btn" onclick="runMatching()" style="font-size:12px;padding:6px 14px"{% if not keywords %} disabled{% endif %}>Run Matching</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill Taxonomy clusters (full width) -->
+  <div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em">
+        Skill Taxonomy
+      </div>
+      <div id="taxonomy-status" style="font-size:11px;color:var(--muted-fg);font-family:var(--mono)">Loading…</div>
+    </div>
+    <div class="card">
+      <!-- Cluster buttons row -->
+      <div id="cluster-btns" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      <!-- Expanded skills box — shown below buttons when a cluster is selected -->
+      <div id="cluster-skills-box" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div id="cluster-skills-label" style="font-size:11px;font-weight:600;color:var(--fg);margin-bottom:8px"></div>
+        <div id="cluster-skills-wrap" style="display:flex;flex-wrap:wrap;gap:5px"></div>
       </div>
     </div>
   </div>
@@ -169,211 +146,176 @@ function handleFileSelect(input) {
   if (input.files[0]) uploadFile(input.files[0]);
 }
 
-// ── Skill taxonomy ────────────────────────────────────────────────────────────
+// ── Skill taxonomy cluster buttons ────────────────────────────────────────────
 
-async function loadTaxonomyStatus() {
-  try {
-    const r = await fetch('/api/taxonomy/status');
-    const d = await r.json();
-    const statusEl = document.getElementById('taxonomy-status');
-    const btn = document.getElementById('taxonomy-btn');
-    if (d.building) {
-      btn.disabled = true;
-      btn.textContent = 'Building…';
-      statusEl.textContent = 'Build in progress…';
-      _startTaxonomyPolling();
-    } else if (d.built) {
-      statusEl.textContent = `${d.count} skills in taxonomy`;
-      btn.textContent = 'Rebuild Taxonomy';
-      showTaxonomyPreview();
-    } else {
-      statusEl.textContent = 'Not built yet — click Build Taxonomy to generate from job descriptions.';
-    }
-  } catch(e) {}
+let _clusters = [];
+let _activeCluster = null;  // name of currently expanded cluster, or null
+
+function _cvSkillsSet() {
+  const tags = document.querySelectorAll('.skill-tag[data-source="cv"], .skill-tag[data-source="extra"]');
+  return new Set([...tags].map(t => t.dataset.skill.toLowerCase()));
 }
 
-async function showTaxonomyPreview() {
-  try {
-    const r = await fetch('/api/taxonomy/skills');
-    if (!r.ok) return;
-    const skills = await r.json();
-    renderTaxonomyTags(skills);
-  } catch(e) {}
-}
-
-let _selectedSkills = new Set();
-
-function renderTaxonomyTags(skills) {
-  _selectedSkills.clear();
-  _updateActionBar();
-  const wrap = document.getElementById('taxonomy-skills-wrap');
+function _renderClusters(clusters) {
+  _clusters = clusters;
+  const wrap = document.getElementById('cluster-btns');
   wrap.innerHTML = '';
-  if (!skills.length) {
-    document.getElementById('taxonomy-skills').style.display = 'none';
+  const cvSkills = _cvSkillsSet();
+
+  clusters.forEach(c => {
+    const cvCount = c.skills.filter(s => cvSkills.has(s.toLowerCase())).length;
+
+    const btn = document.createElement('button');
+    btn.dataset.cluster = c.name;
+    btn.style.cssText = [
+      'display:inline-flex;align-items:center;gap:6px',
+      'padding:5px 12px;border-radius:99px;font-size:12px;font-family:var(--mono)',
+      'border:1px solid var(--border);background:var(--surface-2);color:var(--fg)',
+      'cursor:pointer;user-select:none;transition:background 0.1s,border-color 0.1s',
+    ].join(';');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = c.name;
+    btn.appendChild(nameSpan);
+
+    if (cvCount > 0) {
+      const badge = document.createElement('span');
+      badge.style.cssText = 'font-size:10px;padding:1px 6px;border-radius:99px;background:var(--accent-bg);color:var(--accent)';
+      badge.textContent = cvCount;
+      btn.appendChild(badge);
+    }
+
+    const countSpan = document.createElement('span');
+    countSpan.style.cssText = 'font-size:10px;color:var(--muted-fg)';
+    countSpan.textContent = c.skill_count;
+    btn.appendChild(countSpan);
+
+    btn.addEventListener('click', () => _toggleCluster(c.name));
+    wrap.appendChild(btn);
+  });
+}
+
+function _toggleCluster(name) {
+  const box = document.getElementById('cluster-skills-box');
+
+  if (_activeCluster === name) {
+    // Collapse
+    _activeCluster = null;
+    box.style.display = 'none';
+    _setClusterBtnActive(null);
     return;
   }
-  skills.forEach(skill => {
+
+  _activeCluster = name;
+  _setClusterBtnActive(name);
+
+  const c = _clusters.find(x => x.name === name);
+  if (!c) return;
+
+  const cvSkills = _cvSkillsSet();
+  const inCV = c.skills.filter(s => cvSkills.has(s.toLowerCase()));
+  const missing = c.skills.filter(s => !cvSkills.has(s.toLowerCase()));
+
+  const label = document.getElementById('cluster-skills-label');
+  label.textContent = name + (inCV.length ? ` — ${inCV.length} of ${c.skill_count} in your CV` : ` — ${c.skill_count} skills`);
+
+  const skillsWrap = document.getElementById('cluster-skills-wrap');
+  skillsWrap.innerHTML = '';
+
+  inCV.forEach(skill => {
     const tag = document.createElement('span');
-    tag.dataset.skill = skill;
-    tag.style.cssText = 'display:inline-flex;align-items:center;padding:3px 10px;border-radius:99px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);cursor:pointer;user-select:none;transition:background 0.1s,color 0.1s';
-    _applyTagStyle(tag, false);
+    tag.style.cssText = 'padding:3px 10px;border-radius:99px;font-size:11px;font-family:var(--mono);background:var(--accent-bg);color:var(--accent);border:1px solid transparent';
     tag.textContent = skill;
-    tag.addEventListener('click', () => _toggleSkill(tag, skill));
-    wrap.appendChild(tag);
+    skillsWrap.appendChild(tag);
   });
-  document.getElementById('taxonomy-skills').style.display = '';
-  document.getElementById('taxonomy-status').textContent = `${skills.length} skills in taxonomy`;
-}
-
-function _applyTagStyle(tag, selected) {
-  if (selected) {
-    tag.style.background = 'var(--red-bg)';
-    tag.style.color = 'var(--red)';
-    tag.style.borderColor = 'var(--red)';
-  } else {
-    tag.style.background = 'var(--surface-2)';
-    tag.style.color = 'var(--muted-fg)';
-    tag.style.borderColor = 'var(--border)';
-  }
-}
-
-function _toggleSkill(tag, skill) {
-  if (_selectedSkills.has(skill)) {
-    _selectedSkills.delete(skill);
-    _applyTagStyle(tag, false);
-  } else {
-    _selectedSkills.add(skill);
-    _applyTagStyle(tag, true);
-  }
-  _updateActionBar();
-}
-
-function _updateActionBar() {
-  const bar = document.getElementById('taxonomy-action-bar');
-  const countEl = document.getElementById('taxonomy-sel-count');
-  const n = _selectedSkills.size;
-  if (n > 0) {
-    bar.style.display = 'flex';
-    countEl.textContent = `${n} selected`;
-  } else {
-    bar.style.display = 'none';
-  }
-}
-
-function clearTaxonomySelection() {
-  _selectedSkills.clear();
-  document.querySelectorAll('#taxonomy-skills-wrap [data-skill]').forEach(tag => {
-    _applyTagStyle(tag, false);
+  missing.forEach(skill => {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'padding:3px 10px;border-radius:99px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--surface-2);color:var(--muted-fg)';
+    tag.textContent = skill;
+    skillsWrap.appendChild(tag);
   });
-  _updateActionBar();
+
+  box.style.display = '';
 }
 
-function confirmDeleteSelected() {
-  const n = _selectedSkills.size;
-  if (!n) return;
-  const list = [..._selectedSkills].slice(0, 5).join(', ') + (n > 5 ? ` … +${n-5} more` : '');
-  if (!confirm(`Delete ${n} skill${n > 1 ? 's' : ''} from taxonomy?\n\n${list}`)) return;
-  _commitDeletion();
-}
-
-async function _commitDeletion() {
-  const toDelete = new Set([..._selectedSkills].map(s => s.toLowerCase()));
-  // Remove tags from DOM
-  document.querySelectorAll('#taxonomy-skills-wrap [data-skill]').forEach(tag => {
-    if (toDelete.has(tag.dataset.skill.toLowerCase())) tag.remove();
+function _setClusterBtnActive(name) {
+  document.querySelectorAll('#cluster-btns button').forEach(btn => {
+    const active = btn.dataset.cluster === name;
+    btn.style.background    = active ? 'var(--fg)'      : 'var(--surface-2)';
+    btn.style.color         = active ? 'var(--bg)'      : 'var(--fg)';
+    btn.style.borderColor   = active ? 'var(--fg)'      : 'var(--border)';
   });
-  // Collect remaining
-  const remaining = [...document.querySelectorAll('#taxonomy-skills-wrap [data-skill]')]
-    .map(t => t.dataset.skill);
-  _selectedSkills.clear();
-  _updateActionBar();
-  document.getElementById('taxonomy-status').textContent = `${remaining.length} skills in taxonomy`;
-  try {
-    await fetch('/api/taxonomy/skills', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(remaining),
-    });
-    showToast(`${toDelete.size} skill${toDelete.size > 1 ? 's' : ''} removed from taxonomy.`);
-  } catch(e) {
-    showToast('Failed to save taxonomy changes.');
-  }
 }
 
-let _taxonomyPollTimer = null;
-
-async function buildTaxonomy() {
-  const btn = document.getElementById('taxonomy-btn');
+async function loadTaxonomyStatus() {
   const statusEl = document.getElementById('taxonomy-status');
-  try {
-    const r = await fetch('/api/taxonomy/build', { method: 'POST' });
-    const d = await r.json();
-    if (d.ok) {
-      btn.disabled = true;
-      btn.textContent = 'Building…';
-      statusEl.textContent = 'Mining job descriptions and validating with AI — this may take a minute…';
-      _startTaxonomyPolling();
-    } else {
-      statusEl.textContent = 'Build failed: ' + (d.error || d.message || 'unknown error');
-      showToast('Taxonomy build failed.');
-    }
-  } catch(e) {
-    statusEl.textContent = 'Build failed — check server logs.';
-    showToast('Taxonomy build failed.');
-  }
-}
-
-function _startTaxonomyPolling() {
-  if (_taxonomyPollTimer) return;
-  _taxonomyPollTimer = setInterval(_pollTaxonomyStatus, 3000);
-}
-
-async function _pollTaxonomyStatus() {
   try {
     const r = await fetch('/api/taxonomy/status');
     const d = await r.json();
-    const btn = document.getElementById('taxonomy-btn');
-    const statusEl = document.getElementById('taxonomy-status');
-    if (!d.building) {
-      clearInterval(_taxonomyPollTimer);
-      _taxonomyPollTimer = null;
-      btn.disabled = false;
-      btn.textContent = d.built ? 'Rebuild Taxonomy' : 'Build Taxonomy';
-      if (d.built) {
-        statusEl.textContent = `${d.count} skills in taxonomy`;
-        showToast(`Taxonomy built — ${d.count} skills curated.`);
-        showTaxonomyPreview();
-      } else {
-        statusEl.textContent = 'Build finished — no skills kept. Try again.';
+    if (d.built) {
+      statusEl.textContent = `${d.count} skills · ${d.clusters || 0} clusters`;
+      const cr = await fetch('/api/taxonomy/clusters');
+      if (cr.ok) {
+        const clusters = await cr.json();
+        if (clusters.length) _renderClusters(clusters);
+        else statusEl.textContent += ' — no clusters yet';
       }
+    } else if (d.building) {
+      statusEl.textContent = 'Taxonomy build in progress…';
+    } else {
+      statusEl.textContent = 'No taxonomy built yet.';
     }
-  } catch(e) {}
+  } catch(e) {
+    statusEl.textContent = 'Failed to load taxonomy status.';
+    console.error('loadTaxonomyStatus:', e);
+  }
 }
 
 loadTaxonomyStatus();
 
+// ── Matching ──────────────────────────────────────────────────────────────────
+
+let _matchPollTimer = null;
+let _matchBusyStop = null;
+
 async function runMatching() {
   const btn = document.getElementById('match-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Matching…'; }
   try {
     const resp = await fetch('/api/match/now', { method: 'POST' });
     const data = await resp.json();
-    if (data.ok) {
-      showToast('Matching complete — scores updated.');
-    } else {
-      showToast('Matching error: ' + (data.error || data.detail || 'unknown — check server logs'));
-      console.error('Matching failed:', data);
+    if (!data.ok) {
+      showToast('Matching error: ' + (data.error || data.detail || 'unknown'));
+      tbLog('Matching error: ' + (data.error || data.detail), 'error');
+      return;
     }
+    _matchBusyStop = btnBusy(btn, 'Matching');
+    tbLog('Matching started — scoring all jobs against CV…', 'info');
+    _startMatchPolling();
   } catch(e) {
-    showToast('Failed to run matching: ' + e.message);
-    console.error(e);
+    showToast('Failed to start matching: ' + e.message);
+    tbLog('Failed to start matching: ' + e.message, 'error');
   }
-  if (btn) { btn.disabled = false; btn.textContent = 'Run Matching'; }
+}
+
+function _startMatchPolling() {
+  if (_matchPollTimer) return;
+  _matchPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/match/status');
+      const d = await r.json();
+      if (!d.running) {
+        clearInterval(_matchPollTimer);
+        _matchPollTimer = null;
+        if (_matchBusyStop) { _matchBusyStop('Matching complete — scores updated'); _matchBusyStop = null; }
+        showToast('Matching complete — scores updated.');
+      }
+    } catch(e) { console.error('match poll error:', e); }
+  }, 2000);
 }
 
 // ── Skill type toggling ───────────────────────────────────────────────────────
 
-let _kwTypes = {{ keyword_types | tojson }};
+let _kwTypes = {{ keyword_types | tojson | safe }};
 
 function _applySkillTagStyle(tag) {
   const skill = tag.dataset.skill;
@@ -409,17 +351,15 @@ async function saveKeywordTypes() {
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       showToast('Failed to save skill types: ' + (d.detail || resp.status));
-      console.error('saveKeywordTypes failed', resp.status, d);
     }
   } catch(e) { showToast('Failed to save skill types: ' + e.message); }
 }
 
-// Initialise styles for CV-extracted tags on page load
 document.querySelectorAll('.skill-tag').forEach(tag => _applySkillTagStyle(tag));
 
 // ── Extra keywords ────────────────────────────────────────────────────────────
 
-let _extraKeywords = {{ extra_keywords | tojson }};
+let _extraKeywords = {{ extra_keywords | tojson | safe }};
 
 (function initExtra() { renderExtraTags(); })();
 
@@ -483,6 +423,8 @@ async function saveExtraKeywords() {
   } catch(e) { showToast('Failed to save additional skills.'); }
 }
 
+// ── CV upload ─────────────────────────────────────────────────────────────────
+
 async function uploadFile(file) {
   document.getElementById('upload-idle').style.display = 'none';
   document.getElementById('upload-processing').style.display = '';
@@ -494,7 +436,6 @@ async function uploadFile(file) {
     const resp = await fetch('/cv/upload', { method: 'POST', body: formData });
     const data = await resp.json();
 
-    // Update keywords display
     const wrap = document.getElementById('keywords-wrap');
     wrap.innerHTML = '';
     if (data.keywords && data.keywords.length) {
@@ -510,6 +451,8 @@ async function uploadFile(file) {
         wrap.appendChild(span);
       });
       document.getElementById('kw-count').textContent = `(${data.keywords.length})`;
+      // Refresh cluster CV badges after new upload
+      if (_clusters.length) _renderClusters(_clusters);
     } else {
       wrap.innerHTML = '<div style="color:var(--muted-fg);font-size:13px">No keywords extracted yet — matching will run on next scrape.</div>';
     }

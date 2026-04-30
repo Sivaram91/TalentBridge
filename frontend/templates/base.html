@@ -541,6 +541,68 @@ input, select, button, textarea { font-family: var(--sans); }
   animation: slideUp 0.18s ease;
 }
 @keyframes slideUp { from { transform:translateY(8px);opacity:0 } to { transform:none;opacity:1 } }
+
+/* ── Console drawer ──────────────────────────────────────── */
+#tb-console {
+  position: fixed; bottom: 0; left: var(--sidebar-w); right: 0;
+  height: 260px; background: #0d0f14; border-top: 1px solid rgba(255,255,255,0.1);
+  z-index: 8000; display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform 0.2s ease;
+}
+#tb-console.open { transform: translateY(0); }
+#tb-console-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; height: 34px; flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: #161820;
+}
+#tb-console-bar span {
+  font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase;
+  letter-spacing: 0.07em; font-family: var(--mono);
+}
+#tb-console-clear {
+  margin-left: auto; font-size: 11px; color: #555; background: none;
+  border: none; cursor: pointer; font-family: var(--mono); padding: 2px 6px;
+}
+#tb-console-clear:hover { color: #aaa; }
+#tb-console-close {
+  font-size: 13px; color: #555; background: none;
+  border: none; cursor: pointer; padding: 2px 6px; line-height: 1;
+}
+#tb-console-close:hover { color: #ccc; }
+#tb-console-body {
+  flex: 1; overflow-y: auto; padding: 8px 16px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.7;
+}
+#tb-console-body::-webkit-scrollbar { width: 4px; }
+#tb-console-body::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+.tb-log-line { display: flex; gap: 10px; }
+.tb-log-ts  { color: #444; flex-shrink: 0; }
+.tb-log-info  { color: #7ec8a0; }
+.tb-log-warn  { color: #e8c97a; }
+.tb-log-error { color: #e87a7a; }
+.tb-log-msg   { color: #c8c8cc; word-break: break-word; }
+
+/* ── Console toggle button in sidebar footer ─────────────── */
+#console-toggle {
+  margin-left: auto; background: none; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px; cursor: pointer; padding: 3px 7px;
+  color: var(--sidebar-muted); font-size: 10px; font-family: var(--mono);
+  transition: all 0.12s; display: flex; align-items: center; gap: 4px;
+}
+#console-toggle:hover { color: var(--sidebar-fg); border-color: rgba(255,255,255,0.25); }
+#console-toggle.has-activity { color: var(--amber); border-color: var(--amber); }
+
+/* ── Busy button timer overlay ───────────────────────────── */
+.btn-busy-wrap { position: relative; display: inline-flex; }
+.btn-timer {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; gap: 5px;
+  background: inherit; border-radius: inherit;
+  font-size: 11px; font-family: var(--mono); font-weight: 600;
+  color: rgba(255,255,255,0.9); pointer-events: none;
+  border-radius: 6px;
+}
 </style>
 {% block extra_styles %}{% endblock %}
 </head>
@@ -610,7 +672,31 @@ input, select, button, textarea { font-family: var(--sans); }
     <div class="sidebar-footer">
       <span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;flex-shrink:0"></span>
       localhost:7070
+      <button id="console-toggle" onclick="toggleConsole()" title="Toggle console">
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+          <rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M3 4l2.5 2L3 8" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M7 8h2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+        Console
+      </button>
     </div>
+  </div>
+
+  <!-- Console drawer (fixed, sits outside main-area so it overlays scroll-area) -->
+  <div id="tb-console">
+    <div id="tb-console-bar">
+      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style="opacity:0.5">
+        <rect x="1" y="1" width="10" height="10" rx="2" stroke="#888" stroke-width="1.2"/>
+        <path d="M3 4l2.5 2L3 8" stroke="#888" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M7 8h2" stroke="#888" stroke-width="1.1" stroke-linecap="round"/>
+      </svg>
+      <span>Console</span>
+      <span id="tb-log-count" style="color:#555;font-size:10px"></span>
+      <button id="tb-console-clear" onclick="clearConsole()">clear</button>
+      <button id="tb-console-close" onclick="toggleConsole()">✕</button>
+    </div>
+    <div id="tb-console-body"></div>
   </div>
 
   <!-- Main area -->
@@ -635,7 +721,7 @@ input, select, button, textarea { font-family: var(--sans); }
 </div>
 
 <script>
-// Live clock
+// ── Clock ─────────────────────────────────────────────────────────────────────
 function updateClock() {
   document.getElementById('clock').textContent =
     new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -643,13 +729,134 @@ function updateClock() {
 updateClock();
 setInterval(updateClock, 10000);
 
-// Toast helper
+// ── Toast ─────────────────────────────────────────────────────────────────────
 function showToast(msg, duration = 2500) {
   const t = document.createElement('div');
   t.className = 'toast';
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), duration);
+}
+
+// ── Console log ───────────────────────────────────────────────────────────────
+let _logLineCount = 0;
+let _sseSource = null;
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Parse a raw backend log line like "[INFO] 12:34:56  backend.skill_taxonomy — Clustering: batch 2/7…"
+// Returns {ts, level, msg}
+function _parseLine(raw) {
+  const m = raw.match(/^\[(\w+)\]\s+(\d{2}:\d{2}:\d{2})\s+(.*)/s);
+  if (m) return { level: m[1].toLowerCase(), ts: m[2], msg: m[3] };
+  return { level: 'info', ts: '', msg: raw };
+}
+
+function _appendRawLine(raw) {
+  const body = document.getElementById('tb-console-body');
+  if (!body) return;
+  const { level, ts, msg } = _parseLine(raw);
+  const line = document.createElement('div');
+  line.className = 'tb-log-line';
+  line.innerHTML = ts
+    ? `<span class="tb-log-ts">${ts}</span><span class="tb-log-${level} tb-log-msg">${_escHtml(msg)}</span>`
+    : `<span class="tb-log-${level} tb-log-msg" style="padding-left:58px">${_escHtml(msg)}</span>`;
+  body.appendChild(line);
+  // Auto-scroll only if already near bottom
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 60) {
+    body.scrollTop = body.scrollHeight;
+  }
+  _logLineCount++;
+  _updateLogCount(_logLineCount);
+  // Flash toggle if closed
+  const toggle = document.getElementById('console-toggle');
+  if (toggle && !document.getElementById('tb-console').classList.contains('open')) {
+    toggle.classList.add('has-activity');
+    clearTimeout(toggle._flashTimer);
+    toggle._flashTimer = setTimeout(() => toggle.classList.remove('has-activity'), 2000);
+  }
+}
+
+function _updateLogCount(n) {
+  const el = document.getElementById('tb-log-count');
+  if (el) el.textContent = n ? `${n} lines` : '';
+}
+
+// tbLog — for UI-side events (button clicks etc); also sent to server to appear in log files
+function tbLog(msg, level = 'info') {
+  const ts = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const line = `[${level.toUpperCase()}] ${ts}  UI — ${msg}`;
+  _appendRawLine(line);
+  // Send to server so it lands in the log file
+  fetch('/api/console/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([line]),
+  }).catch(() => {});
+}
+
+function clearConsole() {
+  const body = document.getElementById('tb-console-body');
+  if (body) body.innerHTML = '';
+  _logLineCount = 0;
+  _updateLogCount(0);
+}
+
+function toggleConsole() {
+  const panel = document.getElementById('tb-console');
+  const toggle = document.getElementById('console-toggle');
+  panel.classList.toggle('open');
+  toggle.classList.remove('has-activity');
+  if (panel.classList.contains('open') && !_sseSource) {
+    _startSSE();
+  }
+}
+
+function _startSSE() {
+  if (_sseSource) return;
+  _sseSource = new EventSource('/api/console/stream');
+  _sseSource.onmessage = e => {
+    try { _appendRawLine(JSON.parse(e.data)); } catch {}
+  };
+  _sseSource.onerror = () => {
+    // Reconnect after 3s if connection drops
+    _sseSource.close();
+    _sseSource = null;
+    setTimeout(_startSSE, 3000);
+  };
+}
+
+// Start SSE immediately so logs are captured even when drawer is closed
+_startSSE();
+
+// ── Busy button ───────────────────────────────────────────────────────────────
+function btnBusy(btn, label) {
+  btn.disabled = true;
+  let wrap = btn.parentElement;
+  if (!wrap.classList.contains('btn-busy-wrap')) {
+    wrap = document.createElement('span');
+    wrap.className = 'btn-busy-wrap';
+    btn.parentNode.insertBefore(wrap, btn);
+    wrap.appendChild(btn);
+  }
+  const overlay = document.createElement('span');
+  overlay.className = 'btn-timer';
+  overlay.style.background = window.getComputedStyle(btn).background;
+  wrap.appendChild(overlay);
+
+  let secs = 0;
+  const tick = () => { overlay.textContent = `${label} · ${secs}s`; };
+  tick();
+  const timer = setInterval(() => { secs++; tick(); }, 1000);
+
+  return (doneLabel) => {
+    clearInterval(timer);
+    overlay.remove();
+    btn.disabled = false;
+    if (doneLabel !== undefined) tbLog(doneLabel, 'info');
+  };
 }
 </script>
 {% block extra_scripts %}{% endblock %}

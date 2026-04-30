@@ -41,6 +41,17 @@ def _migrate(conn):
         # Maps skill name → "base" | "expert". Default all existing skills to "expert".
         conn.execute("ALTER TABLE cv ADD COLUMN keyword_types_json TEXT NOT NULL DEFAULT '{}'")
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS skill_clusters (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT NOT NULL UNIQUE,
+            skills_json      TEXT NOT NULL DEFAULT '[]',
+            domain_tags_json TEXT NOT NULL DEFAULT '[]',
+            skill_count      INTEGER NOT NULL DEFAULT 0,
+            built_at         TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
 
 def init_db():
     with get_conn() as conn:

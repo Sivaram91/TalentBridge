@@ -2,200 +2,158 @@
 Build and cache a curated skill taxonomy from job descriptions.
 
 Flow:
-1. mine_candidates()  — frequency-rank terms across all descriptions
-2. validate_with_llm() — LLM strictly filters to genuine job skills
-3. Result stored in settings as skill_taxonomy_json
+1. Seed — send first job description to Groq, extract skills as the seed taxonomy
+2. Heuristic pass — for each remaining job, check what % of current taxonomy
+   skills appear in the description text (case-insensitive substring match).
+   If hit rate >= 20%: merge the matched skills (no LLM needed).
+   If hit rate <  20%: description likely has skills not in the taxonomy yet
+   — send to Groq, extract fresh skills, merge any new ones in.
+3. Result stored in settings as skill_taxonomy_json.
 """
 from __future__ import annotations
 import json
 import logging
 import re
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-# ── Stopwords ────────────────────────────────────────────────────────────────
-# Anything here is discarded before the LLM even sees it.
-_STOPWORDS = {
-    # English function / auxiliary
-    "the","and","for","with","you","your","our","are","will","have","that","this",
-    "from","they","their","been","were","has","can","may","not","but","use","its",
-    "all","any","more","also","both","each","into","than","such","well","very",
-    "who","what","how","when","where","which","about","would","should","could",
-    "must","shall","being","had","did","does","doing","done","was","these","those",
-    "own","get","got","let","set","put","run","see","need","want","like","just",
-    "then","here","there","through","between","after","before","during","while",
-    # Vague job-ad adjectives / nouns — never a skill
-    "experience","years","year","knowledge","strong","ability","skills","skill",
-    "good","great","required","preferred","using","ensure","support","help",
-    "make","take","part","etc","other","related","new","existing","including",
-    "within","across","team","work","based","join","role","position","job","hire",
-    "via","per","incl","relevant","minimum","least","plus","high","key","main",
-    "core","deep","broad","solid","proven","various","different","multiple",
-    "several","following","responsible","responsibilities","opportunity","company",
-    "environment","solutions","solution","systems","system","business","product",
-    "products","service","services","process","processes","project","projects",
-    "application","applications","development","implementation","management",
-    "organization","organisation","team","teams","colleague","colleagues",
-    "candidate","candidates","employee","employees","office","location","remote",
-    "hybrid","full","time","part","permanent","contract","salary","benefit",
-    "benefits","package","culture","growth","career","exciting","fast","paced",
-    "growing","leading","world","global","international","local","national",
-    "innovative","dynamic","passionate","motivated","proactive","excellent",
-    "exceptional","outstanding","hands","driven","focused","oriented","based",
-    "forward","looking","thinking","seeking","looking","offering","providing",
-    "working","building","ensuring","managing","leading","supporting","developing",
-    "delivering","creating","designing","implementing","maintaining","improving",
-    "analyze","analyse","analyse","coordinate","communicate","collaborate",
-    # German function words
-    "eine","einen","einem","einer","eines","oder","und","die","der","das","den",
-    "dem","des","ist","sind","wird","werden","kann","auch","bei","mit","von",
-    "für","wie","ein","auf","aus","an","im","in","zu","um","als","nach","sich",
-    "sowie","über","unter","wir","sie","ihr","uns","ihre","ihren","ihrem",
-    "haben","sein","nicht","noch","aber","wenn","dann","damit","dabei","durch",
-    "ohne","zwischen","gegen","während","bereits","gerne","werden","werden",
-    "stellen","stelle","suchen","bieten","bringen","haben","sind","werden",
-    "einem","einer","unsere","unser","unserer","ihrem","ihrer",
-}
 
-# Terms matching these patterns are almost never skills
-_NOISE_RE = re.compile(
-    r'^('
-    r'\d.*'                          # starts with digit
-    r'|.{1,2}$'                      # 1-2 chars
-    r'|.*\b(tion|sion|ment|ness|ity|ance|ence|ship|ling|ings|ward|wards)$'  # generic nouns/suffixes
-    r'|.*ly$'                        # adverbs
-    r'|.*ful$|.*less$|.*ish$'        # adjectives
-    r')',
-    re.IGNORECASE,
-)
+# ── LLM extraction ────────────────────────────────────────────────────────────
 
-_WORD_RE = re.compile(r'\b[a-zA-Z][a-zA-Z0-9\+\#\-\.]{2,}\b')
+_EXTRACT_PROMPT = """You are a technical recruiter reading a job description.
+
+Extract ONLY the concrete skills, technologies, tools, and domain knowledge that a candidate must or should have. Focus on the requirements / qualifications / "Dein Profil" / "What you bring" section — ignore company marketing, benefits, and job responsibilities.
+
+KEEP: programming languages, frameworks, libraries, tools, protocols, standards, hardware platforms, certifications, domain-specific methodologies (e.g. Scrum, ASPICE, Kanban).
+DISCARD: soft skills, generic adjectives, vague nouns, location, salary, company description.
+
+Return ONLY a JSON array of skill strings. Use the canonical short form (e.g. "C++" not "proficiency in C++"). If no concrete skills found, return [].
+No explanation, no markdown — just the JSON array.
+
+JOB DESCRIPTION:
+{desc}"""
 
 
-def mine_candidates(limit: int = 300) -> list[str]:
-    """
-    Scan all non-expired job descriptions. Return up to `limit` candidate
-    terms ranked by document frequency (# distinct jobs containing the term).
-    Only single words ≥4 chars and 2-word phrases are considered.
-    """
-    from .db import get_conn
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT description FROM jobs "
-            "WHERE is_expired=0 AND description IS NOT NULL AND description != ''"
-        ).fetchall()
-
-    doc_freq: Counter = Counter()
-
-    for row in rows:
-        desc = row["description"].lower()
-        words = _WORD_RE.findall(desc)
-        seen: set[str] = set()
-
-        for w in words:
-            if (w not in _STOPWORDS
-                    and len(w) >= 4
-                    and not _NOISE_RE.match(w)):
-                seen.add(w)
-
-        # 2-word phrases
-        tokens = desc.split()
-        for i in range(len(tokens) - 1):
-            a = tokens[i].strip('.,;:()[]"\'-–')
-            b = tokens[i + 1].strip('.,;:()[]"\'-–')
-            if (len(a) >= 3 and len(b) >= 3
-                    and a not in _STOPWORDS and b not in _STOPWORDS
-                    and not _NOISE_RE.match(a) and not _NOISE_RE.match(b)
-                    and _WORD_RE.match(a) and _WORD_RE.match(b)):
-                seen.add(f"{a} {b}")
-
-        for term in seen:
-            doc_freq[term] += 1
-
-    # Must appear in ≥5 distinct jobs to be a real candidate
-    candidates = [
-        term for term, freq in doc_freq.most_common(limit * 4)
-        if freq >= 5
-    ]
-    return candidates[:limit]
+def _parse_llm_json(raw: str) -> list[str]:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    result = json.loads(raw.strip())
+    if isinstance(result, list):
+        return [s.strip() for s in result if isinstance(s, str) and s.strip()]
+    return []
 
 
-async def validate_with_llm(candidates: list[str], batch_size: int = 60) -> list[str]:
-    """
-    Strictly filter candidates to genuine job skills via LLM.
-    On any failure, the batch is DROPPED (not kept) — we prefer precision.
-    """
-    from .gemini import _call_ai
-
-    validated: list[str] = []
-
-    for i in range(0, len(candidates), batch_size):
-        batch = candidates[i:i + batch_size]
-        terms_str = json.dumps(batch, ensure_ascii=False)
-
-        prompt = f"""You are a strict technical recruiter reviewing terms extracted from job postings.
-
-Your task: from the list below, keep ONLY terms that are concrete, specific job skills — things a candidate would list on a CV under "Skills" or "Technical Skills".
-
-KEEP: programming languages (Python, C++, Java), frameworks (React, Spring Boot), tools (Git, Jenkins, JIRA), protocols/standards (CAN bus, REST, AUTOSAR), domain-specific technologies (FPGA, PLC, ROS), certifications (PMP, CISSP), specific methodologies only if very specific (Scrum, Kanban).
-
-DISCARD everything else, including:
-- Generic nouns: "solution", "environment", "quality", "performance", "delivery"
-- Vague adjectives/adverbs: "efficient", "robust", "scalable", "innovative"
-- Job-ad filler: "passionate", "motivated", "fast-paced", "cross-functional"
-- Soft skills: "communication", "leadership", "teamwork", "ownership"
-- HR/company words: "culture", "diversity", "growth", "opportunity"
-- Locations, company names, department names
-- Anything you are unsure about — when in doubt, DISCARD
-
-Input:
-{terms_str}
-
-Return ONLY a JSON array of kept terms, exact strings from input. If nothing qualifies, return [].
-No explanation, no markdown, just the JSON array."""
-
+async def _extract_skills_llm(description: str) -> list[str]:
+    import asyncio
+    from .gemini import _call_ai, GeminiRateLimitError
+    prompt = _EXTRACT_PROMPT.format(desc=description[:8000])
+    for attempt in range(5):
         try:
             raw = await _call_ai(prompt, temperature=0.0)
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            result = json.loads(raw)
-            if isinstance(result, list):
-                kept = [s for s in result if isinstance(s, str) and s in batch]
-                validated.extend(kept)
-                logger.info("Taxonomy batch %d: %d/%d kept", i, len(kept), len(batch))
+            skills = _parse_llm_json(raw)
+            logger.info("Taxonomy LLM: extracted %d skills", len(skills))
+            return skills
+        except GeminiRateLimitError as e:
+            wait = e.retry_after + 5
+            logger.info("Taxonomy LLM: rate limited, waiting %ds (attempt %d/5)…", wait, attempt + 1)
+            await asyncio.sleep(wait)
         except Exception as e:
-            logger.error("Taxonomy LLM validation failed (batch %d): %s — batch dropped", i, e)
-            # Drop on failure — precision over recall
+            logger.error("Taxonomy LLM extraction failed: %s", e)
+            return []
+    logger.error("Taxonomy LLM: gave up after 5 rate-limit retries")
+    return []
 
-    # Deduplicate preserving order
-    seen: set[str] = set()
-    out: list[str] = []
-    for s in validated:
-        key = s.lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(s)
-    return out
 
+# ── Heuristic match ───────────────────────────────────────────────────────────
+
+def _heuristic_hit_rate(taxonomy: list[str], description: str) -> tuple[float, list[str]]:
+    """Return (hit_rate 0-1, list_of_matched_skills)."""
+    if not taxonomy:
+        return 0.0, []
+    desc_lower = description.lower()
+    matched = [s for s in taxonomy if s.lower() in desc_lower]
+    return len(matched) / len(taxonomy), matched
+
+
+# ── Deduplication ─────────────────────────────────────────────────────────────
+
+def _merge(taxonomy: list[str], new_skills: list[str]) -> list[str]:
+    """Append skills not already in taxonomy (case-insensitive dedup)."""
+    existing = {s.lower() for s in taxonomy}
+    for s in new_skills:
+        if s.lower() not in existing:
+            taxonomy.append(s)
+            existing.add(s.lower())
+    return taxonomy
+
+
+# ── Main build ────────────────────────────────────────────────────────────────
 
 async def build_taxonomy() -> list[str]:
-    """Mine → validate → store. Returns the final curated skill list."""
+    """Seed from first job → heuristic/LLM pass over remaining → store."""
+    from .db import get_conn
     from .models import set_setting
 
-    logger.info("Taxonomy: mining candidates…")
-    candidates = mine_candidates(limit=300)
-    logger.info("Taxonomy: %d candidates mined, validating with LLM…", len(candidates))
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, title, description FROM jobs "
+            "WHERE is_expired=0 AND description IS NOT NULL AND description != '' "
+            "ORDER BY id"
+        ).fetchall()
 
-    skills = await validate_with_llm(candidates)
-    logger.info("Taxonomy: %d skills kept after LLM validation", len(skills))
+    jobs = [dict(r) for r in rows]
+    if not jobs:
+        logger.warning("Taxonomy: no job descriptions found")
+        set_setting("skill_taxonomy_json", "[]")
+        set_setting("skill_taxonomy_count", "0")
+        return []
 
-    set_setting("skill_taxonomy_json", json.dumps(skills, ensure_ascii=False))
-    set_setting("skill_taxonomy_count", str(len(skills)))
-    return skills
+    logger.info("Taxonomy: %d job descriptions to process", len(jobs))
+
+    # Step 1 — seed from first job
+    taxonomy: list[str] = []
+    seed_skills = await _extract_skills_llm(jobs[0]["description"])
+    taxonomy = _merge(taxonomy, seed_skills)
+    logger.info("Taxonomy: seeded with %d skills from '%s'", len(taxonomy), jobs[0]["title"])
+
+    llm_calls = 1
+
+    # Step 2 — heuristic + selective LLM for the rest
+    for job in jobs[1:]:
+        desc = job["description"]
+        hit_rate, _ = _heuristic_hit_rate(taxonomy, desc)
+
+        if hit_rate >= 0.20:
+            logger.info(
+                "Taxonomy: '%s' — heuristic %.0f%% hit, skipping LLM",
+                job["title"], hit_rate * 100,
+            )
+        else:
+            logger.info(
+                "Taxonomy: '%s' — heuristic %.0f%% hit (<20%%), sending to LLM",
+                job["title"], hit_rate * 100,
+            )
+            new_skills = await _extract_skills_llm(desc)
+            before = len(taxonomy)
+            taxonomy = _merge(taxonomy, new_skills)
+            llm_calls += 1
+            logger.info(
+                "Taxonomy: added %d new skills (total %d)",
+                len(taxonomy) - before, len(taxonomy),
+            )
+
+    logger.info(
+        "Taxonomy: done — %d skills, %d LLM calls for %d jobs",
+        len(taxonomy), llm_calls, len(jobs),
+    )
+
+    set_setting("skill_taxonomy_json", json.dumps(taxonomy, ensure_ascii=False))
+    set_setting("skill_taxonomy_count", str(len(taxonomy)))
+    return taxonomy
 
 
 def get_taxonomy() -> list[str]:
@@ -206,3 +164,151 @@ def get_taxonomy() -> list[str]:
         return json.loads(raw)
     except Exception:
         return []
+
+
+# ── Clustering ────────────────────────────────────────────────────────────────
+
+_CLUSTER_PROMPT = """You are a technical skills taxonomy expert.
+
+Group the following job skills into named clusters. Each cluster should represent a coherent technical domain (e.g. "Communication Protocols", "Embedded OS & RTOS", "Testing & Validation Tools").
+
+Rules:
+- Every skill must appear in exactly one cluster
+- Cluster names should be concise and domain-specific (3-5 words max)
+- Each cluster should have 3-30 skills
+- Assign 1-3 short domain tags per cluster from this fixed set: embedded, automotive, networking, software, tooling, safety, hardware, testing, methodology, cloud, data, security
+- Aim for 5-15 clusters from this batch
+
+Return ONLY a JSON array of cluster objects, no explanation, no markdown:
+[
+  {{
+    "name": "Communication Protocols",
+    "skills": ["CAN", "FlexRay", "LIN", "Ethernet", "I2C", "SPI", "UART"],
+    "domain_tags": ["embedded", "networking", "automotive"]
+  }},
+  ...
+]
+
+SKILLS TO CLUSTER:
+{skills}"""
+
+_CLUSTER_BATCH_SIZE = 150
+
+
+def _parse_cluster_response(raw: str) -> list[dict]:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    result = json.loads(raw.strip())
+    if not isinstance(result, list):
+        raise ValueError("Expected a list")
+    valid = []
+    for c in result:
+        if not isinstance(c, dict) or not c.get("name") or not isinstance(c.get("skills"), list):
+            continue
+        skills = [s for s in c["skills"] if isinstance(s, str) and s.strip()]
+        domain_tags = [t for t in (c.get("domain_tags") or []) if isinstance(t, str)]
+        if skills:
+            valid.append({"name": c["name"].strip(), "skills": skills, "domain_tags": domain_tags})
+    return valid
+
+
+async def _cluster_batch(batch: list[str]) -> list[dict]:
+    import asyncio
+    from .gemini import _call_ai, GeminiRateLimitError
+    prompt = _CLUSTER_PROMPT.format(skills=json.dumps(batch, ensure_ascii=False))
+    for attempt in range(5):
+        try:
+            raw = await _call_ai(prompt, temperature=0.0)
+            return _parse_cluster_response(raw)
+        except GeminiRateLimitError as e:
+            wait = e.retry_after + 5
+            logger.info("Clustering: rate limited, waiting %ds (attempt %d/5)…", wait, attempt + 1)
+            await asyncio.sleep(wait)
+        except Exception as e:
+            logger.error("Clustering batch failed: %s", e)
+            return []
+    logger.error("Clustering: gave up after 5 retries")
+    return []
+
+
+async def build_clusters(taxonomy: list[str]) -> list[dict]:
+    """Batch taxonomy into chunks → cluster each → merge same-named clusters → store."""
+    from .db import get_conn
+
+    if not taxonomy:
+        return []
+
+    batches = [taxonomy[i:i + _CLUSTER_BATCH_SIZE] for i in range(0, len(taxonomy), _CLUSTER_BATCH_SIZE)]
+    logger.info("Clustering: %d skills in %d batches of ~%d", len(taxonomy), len(batches), _CLUSTER_BATCH_SIZE)
+
+    # Collect clusters across all batches, merging by name (case-insensitive)
+    merged: dict[str, dict] = {}  # name_lower → cluster dict
+    clustered_lower: set[str] = set()
+
+    for idx, batch in enumerate(batches):
+        logger.info("Clustering: batch %d/%d (%d skills)…", idx + 1, len(batches), len(batch))
+        clusters = await _cluster_batch(batch)
+        for c in clusters:
+            key = c["name"].lower()
+            if key in merged:
+                # Same cluster name appeared in a previous batch — merge skills into it
+                existing = merged[key]
+                existing_lower = {s.lower() for s in existing["skills"]}
+                for s in c["skills"]:
+                    if s.lower() not in existing_lower:
+                        existing["skills"].append(s)
+                        existing_lower.add(s.lower())
+                # Union domain tags
+                existing["domain_tags"] = list(set(existing["domain_tags"]) | set(c["domain_tags"]))
+            else:
+                merged[key] = c
+            clustered_lower.update(s.lower() for s in c["skills"])
+
+    valid_clusters = list(merged.values())
+
+    # Orphaned skills (any batch that failed) → "Other"
+    orphans = [s for s in taxonomy if s.lower() not in clustered_lower]
+    if orphans:
+        logger.info("Clustering: %d orphaned skills → 'Other' cluster", len(orphans))
+        valid_clusters.append({"name": "Other", "skills": orphans, "domain_tags": []})
+
+    logger.info("Clustering: %d clusters from %d skills", len(valid_clusters), len(taxonomy))
+
+    with get_conn() as conn:
+        conn.execute("DELETE FROM skill_clusters")
+        for c in valid_clusters:
+            conn.execute(
+                """INSERT INTO skill_clusters (name, skills_json, domain_tags_json, skill_count)
+                   VALUES (?, ?, ?, ?)""",
+                (c["name"],
+                 json.dumps(c["skills"], ensure_ascii=False),
+                 json.dumps(c["domain_tags"], ensure_ascii=False),
+                 len(c["skills"])),
+            )
+
+    return valid_clusters
+
+
+def get_clusters() -> list[dict]:
+    """Return stored clusters from DB."""
+    from .db import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT name, skills_json, domain_tags_json, skill_count FROM skill_clusters ORDER BY skill_count DESC"
+        ).fetchall()
+    result = []
+    for r in rows:
+        try:
+            result.append({
+                "name": r["name"],
+                "skills": json.loads(r["skills_json"]),
+                "domain_tags": json.loads(r["domain_tags_json"]),
+                "skill_count": r["skill_count"],
+            })
+        except Exception:
+            continue
+    return result

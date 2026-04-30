@@ -130,6 +130,7 @@
     {% for level in ['Werkstudent','Ausbildung','Duales Studium','Junior','Senior','Lead','Internship'] %}
     <button class="chip" data-group="level" data-value="{{ level }}" onclick="toggleChip(this)">{{ level }}</button>
     {% endfor %}
+    <button class="chip" data-group="level" data-value="__others__" onclick="toggleChip(this)">Others</button>
   </div>
 
   <!-- Profile chips -->
@@ -138,6 +139,7 @@
     {% for profile in ['Developer','Engineer','Architect','Scrum Master','Project Manager','Product Manager','Designer','Data','DevOps','QA','Coordinator'] %}
     <button class="chip" data-group="profile" data-value="{{ profile }}" onclick="toggleChip(this)">{{ profile }}</button>
     {% endfor %}
+    <button class="chip" data-group="profile" data-value="__others__" onclick="toggleChip(this)">Others</button>
   </div>
 
   <!-- Grid -->
@@ -522,7 +524,11 @@ function clearFilters() {
   applyFilters();
 }
 
-function jobMatchesFilters(job, levelKws, profileKws) {
+// All known keywords per group — used to detect "Others" (no match in any category)
+const ALL_LEVEL_KWS   = Object.values(LEVEL_KEYWORDS).flat();
+const ALL_PROFILE_KWS = Object.values(PROFILE_KEYWORDS).flat();
+
+function jobMatchesFilters(job, levelKws, profileKws, levelOthers, profileOthers) {
   const title   = job.title.toLowerCase();
   const loc     = _normaliseLoc(job.location);
   const country = (job.country || '').trim();
@@ -540,8 +546,23 @@ function jobMatchesFilters(job, levelKws, profileKws) {
       [...activeLocs].some(v => locLower.includes(v.toLowerCase()));
     if (!locMatch) return false;
   }
-  if (levelKws.length && !levelKws.some(kw => title.includes(kw))) return false;
-  if (profileKws.length && !profileKws.some(kw => title.includes(kw))) return false;
+
+  // Level filter: normal chips OR "Others" (title matches no known level keyword)
+  if (levelKws.length || levelOthers) {
+    const matchesKnown = ALL_LEVEL_KWS.some(kw => title.includes(kw));
+    const matchesChips = levelKws.some(kw => title.includes(kw));
+    const matchesOthers = levelOthers && !matchesKnown;
+    if (!matchesChips && !matchesOthers) return false;
+  }
+
+  // Profile filter: normal chips OR "Others"
+  if (profileKws.length || profileOthers) {
+    const matchesKnown = ALL_PROFILE_KWS.some(kw => title.includes(kw));
+    const matchesChips = profileKws.some(kw => title.includes(kw));
+    const matchesOthers = profileOthers && !matchesKnown;
+    if (!matchesChips && !matchesOthers) return false;
+  }
+
   return true;
 }
 
@@ -550,10 +571,12 @@ function applyFilters() {
   const st      = document.getElementById('status-filter').value;
   const searchQ = document.getElementById('search').value.trim();
   const filtersActive = !!(searchQ || activeCountries.size || activeLocs.size || st !== 'all' || activeLevel.size || activeProfile.size);
-  const chipFiltersActive = !!(activeCountries.size || activeLocs.size || activeLevel.size || activeProfile.size);
+  const chipFiltersActive = !!(activeCountries.size || activeLocs.size || activeLevel.size || activeProfile.size || levelOthers || profileOthers);
 
-  const levelKws   = [...activeLevel].flatMap(v => LEVEL_KEYWORDS[v] || []);
-  const profileKws = [...activeProfile].flatMap(v => PROFILE_KEYWORDS[v] || []);
+  const levelOthers  = activeLevel.has('__others__');
+  const profileOthers = activeProfile.has('__others__');
+  const levelKws   = [...activeLevel].filter(v => v !== '__others__').flatMap(v => LEVEL_KEYWORDS[v] || []);
+  const profileKws = [...activeProfile].filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
   const threshold  = {{ threshold|default(50) }};
 
   const cards = document.querySelectorAll('.company-card');
@@ -580,7 +603,7 @@ function applyFilters() {
 
     // Apply chip filters on top
     if (chipFiltersActive) {
-      jobs = jobs.filter(j => jobMatchesFilters(j, levelKws, profileKws));
+      jobs = jobs.filter(j => jobMatchesFilters(j, levelKws, profileKws, levelOthers, profileOthers));
     }
 
     const activeCount  = jobs.length;
@@ -728,13 +751,22 @@ const SCRAPE_ICON = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"
 const FETCH_DESC_ICON = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 let _statusPollTimer = null;
 
+let _fetchBusyStop = null;
+let _scrapeBusyStop = null;
+
 async function triggerFetchDescriptions() {
+  const btn = document.getElementById('fetch-desc-btn');
   try {
     const resp = await fetch('/api/descriptions/fetch', { method: 'POST' });
     const data = await resp.json();
+    if (data.ok) {
+      _fetchBusyStop = btnBusy(btn, 'Fetching');
+      tbLog('Fetch descriptions started…', 'info');
+    }
     showToast(data.message || (data.ok ? 'Fetching started.' : 'Already in progress.'));
   } catch(e) {
     showToast('Failed to start fetch.');
+    tbLog('Failed to start fetch: ' + e.message, 'error');
   }
   startStatusPolling();
 }
@@ -747,10 +779,13 @@ async function triggerScrape() {
     if (!data.ok) {
       showToast(data.message || 'Scrape already in progress.');
     } else {
+      _scrapeBusyStop = btnBusy(btn, 'Scraping');
+      tbLog('Scrape started…', 'info');
       showToast('Scrape started.');
     }
   } catch(e) {
     showToast('Failed to start scrape.');
+    tbLog('Failed to start scrape: ' + e.message, 'error');
   }
   startStatusPolling();
 }
@@ -781,14 +816,22 @@ async function pollStatus() {
 
     const scrapeBtn = document.getElementById('scrape-btn');
     if (d.scraping) {
-      scrapeBtn.disabled = true;
-      scrapeBtn.innerHTML = `${SCRAPE_ICON} Scraping… ${d.scraping_elapsed}s`;
+      if (!_scrapeBusyStop) _scrapeBusyStop = btnBusy(scrapeBtn, 'Scraping');
     } else {
-      scrapeBtn.disabled = false;
+      if (_scrapeBusyStop) { _scrapeBusyStop('Scrape complete'); _scrapeBusyStop = null; }
       scrapeBtn.innerHTML = `${SCRAPE_ICON} Scrape Now`;
     }
 
     _applyDescStatus(dd);
+
+    if (dd.fetching) {
+      tbLog(`Fetching descriptions… ${dd.fetched}/${dd.total}`, 'info');
+    } else {
+      if (_fetchBusyStop) {
+        _fetchBusyStop(`Fetch complete — ${dd.fetched}/${dd.total} descriptions`);
+        _fetchBusyStop = null;
+      }
+    }
 
     // Reset cancel button if fetch finished
     const cancelBtn = document.getElementById('cancel-fetch-btn');

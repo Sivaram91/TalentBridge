@@ -276,14 +276,18 @@ async def api_override_match(job_id: int, score: int = Form(...)):
 
 @app.post("/api/match/now")
 async def api_match_now():
-    try:
-        from .matcher import run_matching
-        await run_matching()
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        import traceback
-        logger.error("Matching failed: %s\n%s", e, traceback.format_exc())
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    import asyncio
+    from .matcher import run_matching, _matching_active
+    if _matching_active:
+        return JSONResponse({"ok": True, "started": False, "message": "Already running"})
+    asyncio.create_task(run_matching())
+    return JSONResponse({"ok": True, "started": True})
+
+
+@app.get("/api/match/status")
+async def api_match_status():
+    from .matcher import _matching_active, _matching_started_at
+    return JSONResponse({"running": _matching_active, "started_at": _matching_started_at})
 
 
 _taxonomy_building = False
@@ -299,8 +303,10 @@ async def api_taxonomy_build():
         global _taxonomy_building
         _taxonomy_building = True
         try:
-            from .skill_taxonomy import build_taxonomy
-            await build_taxonomy()
+            from .skill_taxonomy import build_taxonomy, build_clusters
+            taxonomy = await build_taxonomy()
+            if taxonomy:
+                await build_clusters(taxonomy)
         except Exception as e:
             logger.error("Taxonomy build failed: %s", e)
         finally:
@@ -313,18 +319,161 @@ async def api_taxonomy_build():
 @app.get("/api/taxonomy/status")
 async def api_taxonomy_status():
     from .models import get_setting
+    from .db import get_conn
     raw = get_setting("skill_taxonomy_json", "[]")
     try:
         skills = json.loads(raw)
     except Exception:
         skills = []
-    return JSONResponse({"count": len(skills), "built": len(skills) > 0, "building": _taxonomy_building})
+    with get_conn() as conn:
+        cluster_count = conn.execute("SELECT COUNT(*) FROM skill_clusters").fetchone()[0]
+    return JSONResponse({
+        "count": len(skills),
+        "built": len(skills) > 0,
+        "building": _taxonomy_building,
+        "clusters": cluster_count,
+    })
 
 
 @app.get("/api/taxonomy/skills")
 async def api_taxonomy_skills():
     from .skill_taxonomy import get_taxonomy
     return JSONResponse(get_taxonomy())
+
+
+@app.get("/api/taxonomy/clusters")
+async def api_taxonomy_clusters():
+    from .skill_taxonomy import get_clusters
+    return JSONResponse(get_clusters())
+
+
+# ── Console log — SSE stream + file persistence ───────────────────────────────
+
+import asyncio
+import logging as _logging
+from datetime import datetime
+from fastapi.responses import StreamingResponse
+
+_LOG_DIR = BASE_DIR / "data" / "logs"
+_LOG_MAX_LINES = 2000
+_log_current_file: Path | None = None
+_log_current_lines: int = 0
+
+# Subscribers: set of asyncio.Queue, one per connected SSE client
+_log_subscribers: set[asyncio.Queue] = set()
+_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+@app.on_event("startup")
+async def _capture_loop():
+    global _event_loop
+    _event_loop = asyncio.get_running_loop()
+    # Set root logger to INFO so backend logger.info() calls are not swallowed
+    _logging.getLogger().setLevel(_logging.INFO)
+    # Suppress noisy libraries
+    for noisy in ("httpx", "httpcore", "uvicorn.access"):
+        _logging.getLogger(noisy).setLevel(_logging.WARNING)
+
+
+def _get_log_file() -> Path:
+    global _log_current_file, _log_current_lines
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if _log_current_file is None or _log_current_lines >= _LOG_MAX_LINES:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_current_file = _LOG_DIR / f"console_{ts}.txt"
+        _log_current_lines = 0
+    return _log_current_file
+
+
+def _write_log_line(line: str):
+    global _log_current_lines
+    log_file = _get_log_file()
+    with log_file.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    _log_current_lines += 1
+
+
+def _broadcast_log(line: str):
+    """Write to file and thread-safely push to all SSE subscribers."""
+    _write_log_line(line)
+    if not _event_loop or not _log_subscribers:
+        return
+    def _push():
+        for q in list(_log_subscribers):
+            try:
+                q.put_nowait(line)
+            except asyncio.QueueFull:
+                pass
+    try:
+        _event_loop.call_soon_threadsafe(_push)
+    except RuntimeError:
+        pass
+
+
+class _SSELogHandler(_logging.Handler):
+    LEVEL_MAP = {
+        _logging.DEBUG:    "debug",
+        _logging.INFO:     "info",
+        _logging.WARNING:  "warn",
+        _logging.ERROR:    "error",
+        _logging.CRITICAL: "error",
+    }
+
+    def emit(self, record: _logging.LogRecord):
+        try:
+            ts = datetime.now().strftime("%H:%M:%S")
+            level = self.LEVEL_MAP.get(record.levelno, "info")
+            msg = self.format(record)
+            line = f"[{level.upper()}] {ts}  {msg}"
+            _broadcast_log(line)
+        except Exception:
+            pass
+
+
+# Attach to root logger — level will be set to INFO on startup
+_sse_handler = _SSELogHandler()
+_sse_handler.setFormatter(_logging.Formatter("%(name)s — %(message)s"))
+_sse_handler.setLevel(_logging.DEBUG)
+_logging.getLogger().addHandler(_sse_handler)
+
+
+@app.get("/api/console/stream")
+async def api_console_stream():
+    q: asyncio.Queue = asyncio.Queue(maxsize=500)
+    _log_subscribers.add(q)
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(q.get(), timeout=15)
+                    # SSE format
+                    yield f"data: {json.dumps(line)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"  # prevent connection timeout
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _log_subscribers.discard(q)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/console/log")
+async def api_console_log(request: Request):
+    """Accept log lines from the frontend (UI-side events like button clicks)."""
+    body = await request.json()
+    lines: list[str] = body if isinstance(body, list) else [body]
+    for line in lines:
+        _broadcast_log(line)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/taxonomy/skills")

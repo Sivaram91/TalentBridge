@@ -370,11 +370,14 @@ def ensure_settings_table():
 
 
 def get_setting(key: str, default: str = "") -> str:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key=?", (key,)
-        ).fetchone()
-    return row["value"] if row else default
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key=?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+    except Exception:
+        return default
 
 
 def set_setting(key: str, value: str):
