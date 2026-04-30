@@ -160,7 +160,7 @@
   <!-- Level chips -->
   <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
     <span style="font-size:11px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px">Level</span>
-    {% for level in ['Werkstudent','Ausbildung','Duales Studium','Junior','Senior','Lead','Internship'] %}
+    {% for level in ['Student Jobs','Entry','Junior','Senior','Management'] %}
     <button class="chip" data-group="level" data-value="{{ level }}" onclick="toggleChip(this)">{{ level }}</button>
     {% endfor %}
     <button class="chip" data-group="level" data-value="__others__" onclick="toggleChip(this)">Others</button>

@@ -891,13 +891,11 @@ function titleMatchesProfile(title, profileName) {
 }
 
 const LEVEL_KEYWORDS = {
-  'Werkstudent':    ['werkstudent', 'working student'],
-  'Ausbildung':     ['ausbildung', 'azubi', 'apprentice'],
-  'Duales Studium': ['duales studium', 'dual study', 'dualer student'],
-  'Junior':         ['junior', 're:\\bjr\\.', 'entry level', 'entry-level', 'graduate'],
-  'Senior':         ['senior', 're:\\bsr\\.', 'principal', 'staff engineer'],
-  'Lead':           ['tech lead', 'team lead', 'head of', 're:^lead\\b', 're:\\blead\\s'],
-  'Internship':     ['intern', 'praktikum', 'praktikant'],
+  'Student Jobs': ['werkstudent', 'working student', 'ausbildung', 'azubi', 'apprentice', 'duales studium', 'dual study', 'dualer student', 'intern', 'praktikum', 'praktikant'],
+  'Entry':        ['entry level', 'entry-level', 'graduate', 're:\\bjr\\.', 'berufseinsteiger'],
+  'Junior':       ['junior'],
+  'Senior':       ['senior', 're:\\bsr\\.', 'principal', 'staff engineer'],
+  'Management':   ['tech lead', 'team lead', 'head of', 're:^lead\\b', 're:\\blead\\s', 'manager', 'director', 're:\\bvp\\b', 'vice president'],
 };
 
 const PROFILE_KEYWORDS = {
