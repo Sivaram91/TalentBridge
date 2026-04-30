@@ -174,12 +174,17 @@ def upsert_job(company_id: int, title: str, description: str,
                url: str, location: str) -> int:
     with get_conn() as conn:
         existing = conn.execute(
-            "SELECT id FROM jobs WHERE company_id=? AND title=? AND is_expired=0",
+            "SELECT id, url FROM jobs WHERE company_id=? AND title=? AND is_expired=0",
             (company_id, title)
         ).fetchone()
         if existing:
-            # Preserve existing description if the new scrape didn't fetch one
-            if description:
+            # If title AND url match, the job is unchanged — only touch last_seen
+            if existing["url"] == url:
+                conn.execute(
+                    "UPDATE jobs SET last_seen=datetime('now') WHERE id=?",
+                    (existing["id"],)
+                )
+            elif description:
                 conn.execute(
                     "UPDATE jobs SET last_seen=datetime('now'), description=?, url=?, location=? WHERE id=?",
                     (description, url, location, existing["id"])
