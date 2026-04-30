@@ -515,16 +515,16 @@ function jobMatchesFilters(job, levelKws, profileKws, levelOthers, profileOthers
 
   // Level filter: normal chips OR "Others" (title matches no known level keyword)
   if (levelKws.length || levelOthers) {
-    const matchesKnown = ALL_LEVEL_KWS.some(kw => title.includes(kw));
-    const matchesChips = levelKws.some(kw => title.includes(kw));
+    const matchesKnown  = ALL_LEVEL_KWS.some(kw => _kwMatch(title, kw));
+    const matchesChips  = levelKws.some(kw => _kwMatch(title, kw));
     const matchesOthers = levelOthers && !matchesKnown;
     if (!matchesChips && !matchesOthers) return false;
   }
 
   // Profile filter: normal chips OR "Others"
   if (profileKws.length || profileOthers) {
-    const matchesKnown = ALL_PROFILE_KWS.some(kw => title.includes(kw));
-    const matchesChips = profileKws.some(kw => title.includes(kw));
+    const matchesKnown  = titleMatchesAnyProfile(title);
+    const matchesChips  = profileKws.some(kw => _kwMatch(title, kw));
     const matchesOthers = profileOthers && !matchesKnown;
     if (!matchesChips && !matchesOthers) return false;
   }

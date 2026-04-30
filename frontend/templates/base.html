@@ -871,51 +871,172 @@ function btnBusy(btn, label) {
 </script>
 {% block extra_scripts %}{% endblock %}
 <script>
-// ── Shared filter constants (used by companies + company_detail) ──────────────
+// ── Shared filter constants (used by companies + company_detail + jobs) ───────
+
+// Word-boundary match: each keyword can be a plain word/phrase (matched at word
+// boundaries) or a regex string starting with "re:" (matched as-is).
+// Multi-word phrases are matched as literal substrings between word boundaries.
+function _kwMatch(title, kw) {
+  if (kw.startsWith('re:')) {
+    return new RegExp(kw.slice(3), 'i').test(title);
+  }
+  // Escape special regex chars in the keyword, then wrap in word boundaries
+  const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // For multi-word phrases, \b on each end is enough
+  return new RegExp('\\b' + escaped + '\\b', 'i').test(title);
+}
+
+function titleMatchesProfile(title, profileName) {
+  const kws = PROFILE_KEYWORDS[profileName] || [];
+  return kws.some(kw => _kwMatch(title, kw));
+}
+
 const LEVEL_KEYWORDS = {
   'Werkstudent':    ['werkstudent', 'working student'],
   'Ausbildung':     ['ausbildung', 'azubi', 'apprentice'],
   'Duales Studium': ['duales studium', 'dual study', 'dualer student'],
-  'Junior':         ['junior', 'jr.', 'entry level', 'entry-level', 'graduate'],
-  'Senior':         ['senior', 'sr.', 'principal', 'staff'],
-  'Lead':           ['lead ', 'tech lead', 'team lead', 'head of'],
+  'Junior':         ['junior', 're:\\bjr\\.', 'entry level', 'entry-level', 'graduate'],
+  'Senior':         ['senior', 're:\\bsr\\.', 'principal', 'staff engineer'],
+  'Lead':           ['tech lead', 'team lead', 'head of', 're:^lead\\b', 're:\\blead\\s'],
   'Internship':     ['intern', 'praktikum', 'praktikant'],
 };
 
 const PROFILE_KEYWORDS = {
-  'Software Developer':  ['software developer', 'softwareentwickler', 'software entwickler',
-                          'developer', 'entwickler', 'frontend', 'backend', 'fullstack',
-                          'full-stack', 'full stack', 'embedded developer', 'firmware developer',
-                          'web developer', 'mobile developer', 'application developer',
-                          'software engineer', 'software-engineer'],
-  'Software Architect':  ['software architect', 'softwarearchitekt', 'solution architect',
-                          'enterprise architect', 'architect', 'architekt'],
-  'Test Engineer':       ['test engineer', 'testengineer', 'test automation', 'tester',
-                          'testing engineer', 'softwaretester', 'software tester'],
-  'Systems Engineer':    ['systems engineer', 'system engineer', 'systemingenieur',
-                          'embedded engineer', 'firmware engineer', 'hardware engineer',
-                          'platform engineer', 'integration engineer', 'field engineer',
-                          'security engineer', 'cybersecurity', 'information security',
-                          'infosec', 'appsec', 'penetration test', 'electrical engineer',
-                          'electronics engineer', 'mechatronics', 'ingenieur'],
-  'Product Owner':       ['product owner', 'produktowner', 'product manager', 'produktmanager'],
-  'Scrum Master':        ['scrum master', 'agile coach', 'agile master', 'scrummaster'],
-  'Quality Engineer':    ['quality engineer', 'quality assurance', 'qualitätsingenieur',
-                          'qualitätssicherung', 'process quality', 'functional safety'],
-  'Project Manager':     ['project manager', 'projektmanager', 'projektleiter',
-                          'program manager', 'programme manager', 'it manager'],
-  'DevOps / Cloud':      ['devops', 'site reliability', 'sre', 'cloud engineer', 'cloud architect',
-                          'cloud developer', 'infrastructure engineer', 'platform engineer',
-                          'platform ops', 'release engineer', 'build engineer', 'ci/cd',
-                          'kubernetes', 'k8s'],
-  'Data / ML / AI':      ['data scientist', 'data engineer', 'data analyst', 'data architect',
-                          'machine learning', 'ml engineer', 'ai engineer', 'ai developer',
-                          'deep learning', 'nlp engineer', 'computer vision',
-                          'analytics engineer', 'business intelligence', 'bi developer'],
+  // ── Software Developer ───────────────────────────────────────────────────
+  // Matches titles where the person primarily writes code.
+  // Excludes plain "engineer" (too broad) — must have software/web/app/etc. qualifier
+  // or a language/framework signal.
+  'Software Developer': [
+    'software developer', 'softwaredeveloper',
+    'softwareentwickler', 'software-entwickler', 'sw developer', 'sw-developer',
+    'applikationsentwickler', 'anwendungsentwickler', 'webentwickler',
+    'programmierer', 'softwareprogrammierer',
+    'software engineer', 'software-engineer',
+    'frontend engineer', 'frontend developer', 'frontend-developer',
+    'backend engineer', 'backend developer', 'backend-developer',
+    'fullstack', 'full-stack', 'full stack',
+    'web developer', 'web engineer',
+    'mobile developer', 'mobile engineer', 'ios developer', 'android developer',
+    'application developer', 'application engineer',
+    'embedded software', 'firmware developer', 'firmware engineer',
+    're:\\bdeveloper\\b', 're:\\bentwickler\\b',
+  ],
+
+  // ── Software Architect ───────────────────────────────────────────────────
+  'Software Architect': [
+    'software architect', 'softwarearchitekt', 'software-architekt',
+    'solution architect', 'lösungsarchitekt',
+    'enterprise architect', 'unternehmensarchitekt',
+    'it architect', 'cloud architect',
+    'application architect', 'system architect', 'systemarchitekt',
+    're:\\barchitect\\b', 're:\\barchitekt\\b',
+  ],
+
+  // ── Test Engineer ────────────────────────────────────────────────────────
+  'Test Engineer': [
+    'test engineer', 'testengineer', 'testingenieur',
+    'test automation', 'testautomatisierung',
+    'software tester', 'softwaretester',
+    'testing engineer', 'tester',
+    'validation engineer', 'validierungsingenieur',
+    'verification engineer',
+    'quality assurance engineer', 'qa engineer',
+    're:\\bqa\\b', 're:\\bqe\\b',
+    'sdet',
+  ],
+
+  // ── Systems Engineer ─────────────────────────────────────────────────────
+  // Hardware, electrical, embedded HW, integration, security — anything
+  // where the primary domain is a physical or cross-cutting system (not SW).
+  'Systems Engineer': [
+    'systems engineer', 'systemingenieur', 'system engineer',
+    'hardware engineer', 'hardwareentwickler', 'hw engineer',
+    'electrical engineer', 'elektroingenieur', 'elektronikingenieur',
+    'electronics engineer', 'mechatronic', 'mechatroniker',
+    'embedded engineer', 'embedded systems',
+    'integration engineer', 'integrationsingenieur',
+    'field application engineer',
+    'security engineer', 'cybersecurity', 'cyber security',
+    'information security', 'infosec', 'appsec',
+    're:\\bpenetration\\b', 'pentester',
+    're:\\bingenieur\\b',
+  ],
+
+  // ── Product Owner ────────────────────────────────────────────────────────
+  'Product Owner': [
+    'product owner', 'produktowner', 'product manager', 'produktmanager',
+    'product lead',
+  ],
+
+  // ── Scrum Master ─────────────────────────────────────────────────────────
+  'Scrum Master': [
+    'scrum master', 'scrummaster', 'agile coach', 'agile master',
+    'agile manager',
+  ],
+
+  // ── Quality Engineer ─────────────────────────────────────────────────────
+  // Process & product quality (not software QA — that's Test Engineer)
+  'Quality Engineer': [
+    'quality engineer', 'qualitätsingenieur', 'qualitätssicherung',
+    'quality manager', 'qualitätsmanager',
+    'quality assurance manager',
+    'process quality', 'prozessqualität',
+    'functional safety', 'funktionale sicherheit',
+    'iso 9001', 'iatf',
+    're:\\bquality\\b',
+  ],
+
+  // ── Project Manager ──────────────────────────────────────────────────────
+  'Project Manager': [
+    'project manager', 'projektmanager', 'projektleiter', 'project lead',
+    'program manager', 'programme manager', 'programm manager',
+    'it project', 'it-projektleiter',
+    'delivery manager', 'engagement manager',
+  ],
+
+  // ── DevOps / Cloud ───────────────────────────────────────────────────────
+  'DevOps / Cloud': [
+    'devops', 'dev ops',
+    'site reliability', 're:\\bsre\\b',
+    'cloud engineer', 'cloud developer', 'cloud ops',
+    'infrastructure engineer', 'infrastrukturingenieur',
+    'platform engineer', 'platform ops',
+    'release engineer', 'release manager',
+    'build engineer', 'build & release',
+    'mlops', 'dataops',
+    're:\\bkubernetes\\b', 're:\\bk8s\\b',
+  ],
+
+  // ── Data / ML / AI ───────────────────────────────────────────────────────
+  'Data / ML / AI': [
+    'data scientist', 'data science',
+    'data engineer', 'dateningenieur',
+    'data analyst', 'datenanalyst',
+    'data architect',
+    'machine learning', 'maschinelles lernen',
+    're:\\bml engineer\\b', 're:\\bml-engineer\\b',
+    'ai engineer', 'ki-ingenieur', 'ki ingenieur',
+    'ai developer', 'ki entwickler',
+    'deep learning', 'neural network',
+    'nlp engineer', 'computer vision',
+    'analytics engineer', 'business intelligence',
+    're:\\bdata\\b',
+  ],
 };
 
 const ALL_LEVEL_KWS   = Object.values(LEVEL_KEYWORDS).flat();
 const ALL_PROFILE_KWS = Object.values(PROFILE_KEYWORDS).flat();
+
+// Pre-build RegExp objects for ALL_PROFILE_KWS used in "Others" detection
+const _ALL_PROFILE_RES = ALL_PROFILE_KWS.map(kw => {
+  if (kw.startsWith('re:')) return new RegExp(kw.slice(3), 'i');
+  const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + escaped + '\\b', 'i');
+});
+
+function titleMatchesAnyProfile(title) {
+  return _ALL_PROFILE_RES.some(re => re.test(title));
+}
 </script>
 </body>
 </html>

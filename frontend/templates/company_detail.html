@@ -294,13 +294,13 @@ function jobMatchesGlobalFilters(title, location, country, filters) {
   const profileKws    = profileVals.filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
 
   if (levelKws.length || levelOthers) {
-    const knownMatch = levelKws.some(kw => t.includes(kw));
-    const isOther    = !ALL_LEVEL_KWS.some(kw => t.includes(kw));
+    const knownMatch = levelKws.some(kw => _kwMatch(t, kw));
+    const isOther    = !ALL_LEVEL_KWS.some(kw => _kwMatch(t, kw));
     if (!knownMatch && !(levelOthers && isOther)) return false;
   }
   if (profileKws.length || profileOthers) {
-    const knownMatch = profileKws.some(kw => t.includes(kw));
-    const isOther    = !ALL_PROFILE_KWS.some(kw => t.includes(kw));
+    const knownMatch = profileKws.some(kw => _kwMatch(t, kw));
+    const isOther    = !titleMatchesAnyProfile(t);
     if (!knownMatch && !(profileOthers && isOther)) return false;
   }
   return true;

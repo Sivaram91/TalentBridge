@@ -281,12 +281,8 @@ function sortBy(col) {
 }
 
 function _matchesProfile(title, profileVal) {
-  const t = title.toLowerCase();
-  if (profileVal === '__others__') {
-    return !ALL_PROFILE_KWS.some(kw => t.includes(kw));
-  }
-  const kws = PROFILE_KEYWORDS[profileVal] || [];
-  return kws.some(kw => t.includes(kw));
+  if (profileVal === '__others__') return !titleMatchesAnyProfile(title);
+  return titleMatchesProfile(title, profileVal);
 }
 
 function filterJobs() {
