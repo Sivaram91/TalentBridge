@@ -178,10 +178,17 @@ def upsert_job(company_id: int, title: str, description: str,
             (company_id, title)
         ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE jobs SET last_seen=datetime('now'), description=?, url=?, location=? WHERE id=?",
-                (description, url, location, existing["id"])
-            )
+            # Preserve existing description if the new scrape didn't fetch one
+            if description:
+                conn.execute(
+                    "UPDATE jobs SET last_seen=datetime('now'), description=?, url=?, location=? WHERE id=?",
+                    (description, url, location, existing["id"])
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET last_seen=datetime('now'), url=?, location=? WHERE id=?",
+                    (url, location, existing["id"])
+                )
             return existing["id"]
         cur = conn.execute(
             "INSERT INTO jobs (company_id, title, description, url, location) VALUES (?,?,?,?,?)",
