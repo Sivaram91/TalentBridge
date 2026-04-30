@@ -180,6 +180,25 @@ async def set_experience_level(body: dict):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/preferred-countries")
+async def get_preferred_countries():
+    import json as _json
+    raw = get_setting("preferred_countries", "[]")
+    try:
+        countries = _json.loads(raw)
+    except Exception:
+        countries = []
+    return JSONResponse({"countries": countries})
+
+
+@app.post("/api/preferred-countries")
+async def set_preferred_countries(body: dict):
+    import json as _json
+    countries = body.get("countries", [])
+    set_setting("preferred_countries", _json.dumps(countries, ensure_ascii=False))
+    return JSONResponse({"ok": True})
+
+
 def _extract_pdf_text(content: bytes) -> str:
     try:
         import pypdf, io

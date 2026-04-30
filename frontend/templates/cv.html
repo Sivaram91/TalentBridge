@@ -53,6 +53,22 @@
       </div>
     </div>
 
+    <!-- Preferred countries -->
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">Preferred Countries</div>
+      <div class="card">
+        <div style="font-size:11px;color:var(--muted-fg);margin-bottom:10px">Jobs outside these countries score 0. Leave empty to match all countries.</div>
+        <div id="country-wrap" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px"></div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <input id="country-input" type="text" placeholder="e.g. Germany, Remote…"
+                 style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);
+                        background:var(--surface-2);color:var(--fg);font-size:13px;font-family:var(--mono)"
+                 onkeydown="handleCountryKey(event)">
+          <button class="btn" onclick="addCountry()" style="font-size:12px;padding:6px 14px">Add</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Additional skills -->
     <div>
       <div style="font-size:12px;font-weight:600;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">
@@ -308,6 +324,70 @@ async function saveExperienceLevel() {
 }
 
 loadExperienceLevel();
+
+// ── Preferred countries ───────────────────────────────────────────────────────
+
+let _countries = [];
+
+async function loadCountries() {
+  try {
+    const r = await fetch('/api/preferred-countries');
+    const d = await r.json();
+    _countries = d.countries || [];
+    renderCountryTags();
+  } catch(e) { console.error('loadCountries:', e); }
+}
+
+function renderCountryTags() {
+  const wrap = document.getElementById('country-wrap');
+  wrap.innerHTML = '';
+  if (_countries.length === 0) {
+    wrap.innerHTML = '<span style="font-size:12px;color:var(--muted-fg)">All countries — add one to restrict.</span>';
+    return;
+  }
+  _countries.forEach((c, i) => {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:99px;font-size:12px;font-family:var(--mono);background:var(--surface-2);border:1px solid var(--border);color:var(--fg)';
+    tag.innerHTML = `<span>${c}</span>
+      <button onclick="removeCountry(${i})" style="background:none;border:none;cursor:pointer;color:var(--muted-fg);font-size:13px;line-height:1;padding:0" title="Remove">&times;</button>`;
+    wrap.appendChild(tag);
+  });
+}
+
+function handleCountryKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); addCountry(); }
+}
+
+function addCountry() {
+  const input = document.getElementById('country-input');
+  const val = input.value.trim();
+  if (!val) return;
+  val.split(',').map(s => s.trim()).filter(Boolean).forEach(c => {
+    if (!_countries.map(x => x.toLowerCase()).includes(c.toLowerCase()))
+      _countries.push(c);
+  });
+  input.value = '';
+  renderCountryTags();
+  saveCountries();
+}
+
+function removeCountry(i) {
+  _countries.splice(i, 1);
+  renderCountryTags();
+  saveCountries();
+}
+
+async function saveCountries() {
+  try {
+    await fetch('/api/preferred-countries', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ countries: _countries }),
+    });
+  } catch(e) { showToast('Failed to save preferred countries.'); }
+}
+
+loadCountries();
 
 // ── Matching ──────────────────────────────────────────────────────────────────
 

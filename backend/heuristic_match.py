@@ -66,6 +66,8 @@ def heuristic_score(
     taxonomy: list[str] | None = None,
     job_title: str = "",
     experience_level: str = "",
+    job_country: str = "",
+    preferred_countries: list[str] | None = None,
 ) -> tuple[int, dict]:
     """
     Score a job description against base + expert CV skills.
@@ -88,6 +90,15 @@ def heuristic_score(
             "missing": [], "has_base": len(base_keywords) > 0,
             "score_note": f"Excluded — job level below your experience ({experience_level})",
         }
+
+    if preferred_countries and job_country:
+        jc = job_country.strip().lower()
+        if jc and not any(jc == pc or pc in jc or jc in pc for pc in preferred_countries):
+            return 0, {
+                "matched_base": [], "matched_expert": [],
+                "missing": [], "has_base": len(base_keywords) > 0,
+                "score_note": f"Excluded — job country '{job_country}' not in preferred list",
+            }
 
     if not all_keywords or len(desc) < 20:
         return 0, {

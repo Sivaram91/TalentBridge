@@ -363,6 +363,7 @@ def ensure_settings_table():
             ("report_day", "monday"),
             ("report_time", "08:00"),
             ("experience_level", "senior"),
+            ("preferred_countries", "[]"),
         ]
         for k, v in defaults:
             conn.execute(

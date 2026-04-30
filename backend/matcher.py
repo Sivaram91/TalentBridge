@@ -44,24 +44,33 @@ async def _do_matching():
     taxonomy = get_taxonomy()  # [] if not built yet
 
     from .models import get_setting
+    import json as _json
     experience_level = get_setting("experience_level", "senior")
+    preferred_countries_raw = get_setting("preferred_countries", "[]")
+    try:
+        preferred_countries = [c.strip().lower() for c in _json.loads(preferred_countries_raw) if c.strip()]
+    except Exception:
+        preferred_countries = []
 
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT j.id, j.title, j.description
+            SELECT j.id, j.title, j.description, j.country
             FROM jobs j
             LEFT JOIN matches m ON m.job_id = j.id
             WHERE j.is_expired = 0 AND (m.id IS NULL OR m.is_override = 0)
         """).fetchall()
     jobs = [dict(r) for r in rows]
-    logger.info("Scoring %d jobs — base: %d kw, expert: %d kw, level: %s",
-                len(jobs), len(base_kw), len(expert_kw), experience_level)
+    logger.info("Scoring %d jobs — base: %d kw, expert: %d kw, level: %s, countries: %s",
+                len(jobs), len(base_kw), len(expert_kw), experience_level,
+                preferred_countries or "any")
 
     for job in jobs:
         score, detail = heuristic_score(
             job.get("description") or "", base_kw, expert_kw, taxonomy,
             job_title=job.get("title") or "",
             experience_level=experience_level,
+            job_country=job.get("country") or "",
+            preferred_countries=preferred_countries,
         )
         reasoning = json.dumps(detail, ensure_ascii=False)
         save_match(job["id"], score, reasoning)
