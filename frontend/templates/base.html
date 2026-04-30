@@ -860,5 +860,42 @@ function btnBusy(btn, label) {
 }
 </script>
 {% block extra_scripts %}{% endblock %}
+<script>
+// ── Shared filter constants (used by companies + company_detail) ──────────────
+const LEVEL_KEYWORDS = {
+  'Werkstudent':    ['werkstudent', 'working student'],
+  'Ausbildung':     ['ausbildung', 'azubi', 'apprentice'],
+  'Duales Studium': ['duales studium', 'dual study', 'dualer student'],
+  'Junior':         ['junior', 'jr.', 'entry level', 'entry-level', 'graduate'],
+  'Senior':         ['senior', 'sr.', 'principal', 'staff'],
+  'Lead':           ['lead ', 'tech lead', 'team lead', 'head of'],
+  'Internship':     ['intern', 'praktikum', 'praktikant'],
+};
+
+const PROFILE_KEYWORDS = {
+  'Developer':        ['developer', 'entwickler', 'software engineer', 'software-engineer',
+                       'frontend', 'backend', 'fullstack', 'full-stack', 'full stack',
+                       'embedded', 'firmware', 'platform engineer', 'systems engineer',
+                       'application engineer', 'web engineer', 'mobile engineer',
+                       'softwareentwickler', 'softwarearchitekt'],
+  'Engineer':         ['mechanical engineer', 'electrical engineer', 'electronics engineer',
+                       'hardware engineer', 'systems engineer', 'test engineer',
+                       'maschinenbau', 'elektrotechnik', 'ingenieur'],
+  'Architect':        ['architect', 'architekt', 'solution architect', 'enterprise architect'],
+  'Scrum Master':     ['scrum master', 'scrum', 'agile coach'],
+  'Project Manager':  ['project manager', 'projektmanager', 'projektleiter', 'program manager', 'programme manager'],
+  'Product Manager':  ['product manager', 'product owner'],
+  'Designer':         ['designer', 'ux researcher', 'ui designer', 'ux/ui', 'user experience', 'user interface'],
+  'Data':             ['data scientist', 'data engineer', 'data analyst', 'machine learning',
+                       'ml engineer', 'ai engineer', 'analytics engineer', 'business intelligence'],
+  'DevOps':           ['devops', 'site reliability', 'sre', 'cloud engineer', 'cloud architect',
+                       'infrastructure engineer', 'platform ops', 'kubernetes', 'k8s', 'ci/cd'],
+  'QA':               ['quality assurance', 'quality engineer', 'test automation', 'tester', 'testing'],
+  'Coordinator':      ['coordinator', 'koordinator', 'consultant', 'advisor'],
+};
+
+const ALL_LEVEL_KWS   = Object.values(LEVEL_KEYWORDS).flat();
+const ALL_PROFILE_KWS = Object.values(PROFILE_KEYWORDS).flat();
+</script>
 </body>
 </html>
