@@ -102,7 +102,19 @@
           <div style="color:var(--muted-fg);font-size:13px">Skills will appear here after CV upload.</div>
         {% endif %}
       </div>
-      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end">
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted-fg)">My experience level:</span>
+        <select id="exp-level-select" onchange="saveExperienceLevel()"
+                style="padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);color:var(--fg);font-size:12px">
+          <option value="werkstudent">Werkstudent</option>
+          <option value="ausbildung">Ausbildung</option>
+          <option value="duales_studium">Duales Studium</option>
+          <option value="internship">Internship</option>
+          <option value="junior">Junior (0–3 yrs)</option>
+          <option value="senior" selected>Senior (5+ yrs)</option>
+          <option value="lead">Lead / Head</option>
+        </select>
+        <span style="font-size:11px;color:var(--muted-fg);flex:1">Jobs below your level score 0</span>
         <button class="btn" id="match-btn" onclick="runMatching()" style="font-size:12px;padding:6px 14px"{% if not keywords %} disabled{% endif %}>Run Matching</button>
       </div>
     </div>
@@ -272,6 +284,30 @@ async function loadTaxonomyStatus() {
 }
 
 loadTaxonomyStatus();
+
+// ── Experience level ──────────────────────────────────────────────────────────
+
+async function loadExperienceLevel() {
+  try {
+    const r = await fetch('/api/experience-level');
+    const d = await r.json();
+    const sel = document.getElementById('exp-level-select');
+    if (sel && d.level) sel.value = d.level;
+  } catch(e) { console.error('loadExperienceLevel:', e); }
+}
+
+async function saveExperienceLevel() {
+  const level = document.getElementById('exp-level-select').value;
+  try {
+    await fetch('/api/experience-level', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ level }),
+    });
+  } catch(e) { showToast('Failed to save experience level.'); }
+}
+
+loadExperienceLevel();
 
 // ── Matching ──────────────────────────────────────────────────────────────────
 

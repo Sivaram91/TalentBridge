@@ -362,6 +362,7 @@ def ensure_settings_table():
             ("scrape_time", "07:00"),
             ("report_day", "monday"),
             ("report_time", "08:00"),
+            ("experience_level", "senior"),
         ]
         for k, v in defaults:
             conn.execute(

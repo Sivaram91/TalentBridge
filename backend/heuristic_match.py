@@ -3,6 +3,37 @@ import re
 
 _WORD_RE = re.compile(r'\b[a-zA-Z][a-zA-Z0-9\+\#\-\.]{1,}\b')
 
+# Keywords that identify each experience level in a job title (lowercase)
+_LEVEL_TITLE_KWS: dict[str, list[str]] = {
+    "werkstudent":    ["werkstudent", "working student"],
+    "ausbildung":     ["ausbildung", "azubi", "apprentice"],
+    "duales_studium": ["duales studium", "dual study", "dualer student"],
+    "junior":         ["junior", "jr.", "entry level", "entry-level", "graduate"],
+    "senior":         ["senior", "sr.", "principal", "staff"],
+    "lead":           ["lead ", "tech lead", "team lead", "head of"],
+    "internship":     ["intern", "praktikum", "praktikant"],
+}
+
+# For each experience level the user picks, which levels are EXCLUDED from matching
+_EXCLUDED_FOR_LEVEL: dict[str, list[str]] = {
+    "werkstudent":    [],
+    "ausbildung":     [],
+    "duales_studium": [],
+    "internship":     [],
+    "junior":         ["werkstudent", "ausbildung", "duales_studium", "internship"],
+    "senior":         ["werkstudent", "ausbildung", "duales_studium", "internship", "junior"],
+    "lead":           ["werkstudent", "ausbildung", "duales_studium", "internship", "junior"],
+}
+
+
+def _title_matches_excluded(title: str, experience_level: str) -> bool:
+    """Return True if the job title belongs to a level excluded for this experience."""
+    t = title.lower()
+    for lvl in _EXCLUDED_FOR_LEVEL.get(experience_level, []):
+        if any(kw in t for kw in _LEVEL_TITLE_KWS.get(lvl, [])):
+            return True
+    return False
+
 
 def _hits(text: str, keywords: list[str]) -> list[str]:
     """Return keywords found in text (word-boundary, case-insensitive)."""
@@ -33,11 +64,14 @@ def heuristic_score(
     base_keywords: list[str],
     expert_keywords: list[str],
     taxonomy: list[str] | None = None,
+    job_title: str = "",
+    experience_level: str = "",
 ) -> tuple[int, dict]:
     """
     Score a job description against base + expert CV skills.
 
     Scoring:
+      - Job titles matching an excluded experience level score 0 immediately.
       - Any base skill hit guarantees score ≥ 50 (job is within your field).
       - Each additional expert skill hit adds 5 points on top.
       - If no base skills defined, each expert hit = 10 points.
@@ -47,6 +81,13 @@ def heuristic_score(
     """
     desc = description or ""
     all_keywords = base_keywords + expert_keywords
+
+    if experience_level and job_title and _title_matches_excluded(job_title, experience_level):
+        return 0, {
+            "matched_base": [], "matched_expert": [],
+            "missing": [], "has_base": len(base_keywords) > 0,
+            "score_note": f"Excluded — job level below your experience ({experience_level})",
+        }
 
     if not all_keywords or len(desc) < 20:
         return 0, {

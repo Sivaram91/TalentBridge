@@ -43,6 +43,9 @@ async def _do_matching():
 
     taxonomy = get_taxonomy()  # [] if not built yet
 
+    from .models import get_setting
+    experience_level = get_setting("experience_level", "senior")
+
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT j.id, j.title, j.description
@@ -51,11 +54,14 @@ async def _do_matching():
             WHERE j.is_expired = 0 AND (m.id IS NULL OR m.is_override = 0)
         """).fetchall()
     jobs = [dict(r) for r in rows]
-    logger.info("Scoring %d jobs — base: %d kw, expert: %d kw", len(jobs), len(base_kw), len(expert_kw))
+    logger.info("Scoring %d jobs — base: %d kw, expert: %d kw, level: %s",
+                len(jobs), len(base_kw), len(expert_kw), experience_level)
 
     for job in jobs:
         score, detail = heuristic_score(
-            job.get("description") or "", base_kw, expert_kw, taxonomy
+            job.get("description") or "", base_kw, expert_kw, taxonomy,
+            job_title=job.get("title") or "",
+            experience_level=experience_level,
         )
         reasoning = json.dumps(detail, ensure_ascii=False)
         save_match(job["id"], score, reasoning)

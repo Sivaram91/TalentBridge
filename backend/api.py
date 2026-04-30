@@ -168,6 +168,18 @@ async def cv_save_keyword_types(types: dict[str, str]):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/experience-level")
+async def get_experience_level():
+    return JSONResponse({"level": get_setting("experience_level", "senior")})
+
+
+@app.post("/api/experience-level")
+async def set_experience_level(body: dict):
+    level = body.get("level", "senior")
+    set_setting("experience_level", level)
+    return JSONResponse({"ok": True})
+
+
 def _extract_pdf_text(content: bytes) -> str:
     try:
         import pypdf, io
