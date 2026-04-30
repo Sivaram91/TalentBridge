@@ -1,4 +1,5 @@
 """Entry point — starts FastAPI + APScheduler + pystray."""
+import logging
 import threading
 import time
 import webbrowser
@@ -8,6 +9,7 @@ from .models import ensure_settings_table
 from .config import load_partners
 from .scheduler import start_scheduler
 
+logger = logging.getLogger(__name__)
 PORT = 7070
 
 
@@ -38,8 +40,8 @@ def _resolve_missing_countries():
             for jid, country in resolved:
                 if country:
                     conn.execute("UPDATE jobs SET country=? WHERE id=?", (country, jid))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("Country resolution pass failed: %s", e, exc_info=True)
 
 
 def main():
@@ -60,8 +62,8 @@ def main():
     try:
         from .tray import run_tray
         threading.Thread(target=run_tray, daemon=True).start()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Tray icon not available: %s", e)
 
     # FastAPI blocks the main thread
     run_server()

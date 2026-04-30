@@ -13,13 +13,12 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def _run_async(coro):
-    """Run an async coroutine from a sync context."""
+    """Run an async coroutine from a sync (scheduler thread) context."""
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(coro)
+        loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _job_scrape():
@@ -46,6 +45,18 @@ def _job_daily_matches():
         logger.error("Daily matches email failed: %s", e)
 
 
+def _parse_hm(time_str: str, default: str) -> tuple[str, str]:
+    """Parse 'HH:MM' safely, falling back to default on malformed input."""
+    try:
+        h, m = time_str.split(":")
+        int(h); int(m)  # validate numeric
+        return h, m
+    except Exception:
+        logger.warning("Malformed time setting '%s', using default '%s'", time_str, default)
+        h, m = default.split(":")
+        return h, m
+
+
 def start_scheduler():
     global _scheduler
     from .models import get_setting
@@ -54,8 +65,8 @@ def start_scheduler():
     report_day = get_setting("report_day", "monday")
     report_time = get_setting("report_time", "08:00")
 
-    scrape_h, scrape_m = scrape_time.split(":")
-    report_h, report_m = report_time.split(":")
+    scrape_h, scrape_m = _parse_hm(scrape_time, "07:00")
+    report_h, report_m = _parse_hm(report_time, "08:00")
 
     _scheduler = BackgroundScheduler()
 
@@ -97,8 +108,8 @@ def reschedule(scrape_time: str, report_day: str, report_time: str):
     global _scheduler
     if _scheduler is None:
         return
-    scrape_h, scrape_m = scrape_time.split(":")
-    report_h, report_m = report_time.split(":")
+    scrape_h, scrape_m = _parse_hm(scrape_time, "07:00")
+    report_h, report_m = _parse_hm(report_time, "08:00")
     daily_match_h = (int(scrape_h) + 1) % 24
 
     _scheduler.reschedule_job("daily_scrape", trigger=CronTrigger(hour=scrape_h, minute=scrape_m))

@@ -10,6 +10,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_task(coro, name: str = "task"):
+    """create_task wrapper that logs exceptions instead of silently dropping them."""
+    async def _run():
+        try:
+            await coro
+        except Exception as exc:
+            logger.error("Background task '%s' failed: %s", name, exc, exc_info=True)
+    return asyncio.create_task(_run())
+
+
 MAX_RETRIES = 3
 RETRY_BACKOFF = [30, 120, 300]
 
@@ -70,7 +81,8 @@ async def _scrape_paginated_css(company: dict) -> Optional[list[dict]]:
     seen_titles: set[str] = set()
     page = start
 
-    while True:
+    MAX_PAGES = 200
+    while page <= start + MAX_PAGES * step:
         url = f"{base_url}{'&' if '?' in base_url else '?'}{param}={page}"
         html = await _fetch_http(url)
         if not html:
@@ -84,6 +96,8 @@ async def _scrape_paginated_css(company: dict) -> Optional[list[dict]]:
         all_jobs.extend(new)
         logger.debug("Page %s: +%d jobs (%d total) from %s", page, len(new), len(all_jobs), company["name"])
         page += step
+    else:
+        logger.warning("Paginated CSS hit %d-page cap for %s", MAX_PAGES, company["name"])
 
     logger.info("Paginated CSS extracted %d jobs from %s", len(all_jobs), company["name"])
     return all_jobs or None
@@ -256,35 +270,37 @@ async def _fetch_js(url: str) -> Optional[str]:
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 900},
-            )
-            page = await context.new_page()
+            try:
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1280, "height": 900},
+                )
+                page = await context.new_page()
 
-            # Block images/fonts/media to speed up load
-            await page.route("**/*", lambda route: route.abort()
-                if route.request.resource_type in ("image", "media", "font")
-                else route.continue_())
+                # Block images/fonts/media to speed up load
+                await page.route("**/*", lambda route: route.abort()
+                    if route.request.resource_type in ("image", "media", "font")
+                    else route.continue_())
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
-            # Scroll down in steps to trigger lazy-loaded job listings
-            for _ in range(5):
-                await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                await asyncio.sleep(0.8)
+                # Scroll down in steps to trigger lazy-loaded job listings
+                for _ in range(5):
+                    await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    await asyncio.sleep(0.8)
 
-            # Extra wait for XHR/fetch calls to settle
-            await asyncio.sleep(3)
+                # Extra wait for XHR/fetch calls to settle
+                await asyncio.sleep(3)
 
-            html = await page.content()
-            await browser.close()
-            logger.debug("Fetched %d chars from %s", len(html), url)
-            return html
+                html = await page.content()
+                logger.debug("Fetched %d chars from %s", len(html), url)
+                return html
+            finally:
+                await browser.close()
     except Exception as e:
         logger.warning("Failed to fetch %s: %s", url, e)
         return None
@@ -415,6 +431,10 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
             from .geo import extract_location_from_description, resolve_country
             with get_conn() as conn:
                 for job, desc in zip(batch, results):
+                    if isinstance(desc, Exception):
+                        logger.warning("Description fetch error for job %s (%s): %s", job["id"], job["url"], desc)
+                        _desc_fetch_done = min(_desc_fetch_done + 1, _desc_fetch_total)
+                        continue
                     if isinstance(desc, str) and desc:
                         stored = conn.execute("SELECT title, location FROM jobs WHERE id=?", (job["id"],)).fetchone()
                         loc = stored["location"] or ""
@@ -527,7 +547,7 @@ async def _do_scrape():
             log_scrape(cid, len(seen_titles), "success")
 
             # Kick off description fetching in background (non-blocking)
-            asyncio.create_task(_fetch_all_descriptions(cid))
+            _safe_task(_fetch_all_descriptions(cid), name=f"desc-fetch-{cid}")
             logger.info("Scraped %d jobs from %s", len(seen_titles), company["name"])
 
         except GeminiRateLimitError as e:
@@ -549,5 +569,5 @@ def _maybe_send_failure_alert(company: dict, consecutive_failures: int):
         try:
             from .email_report import send_failure_alert
             send_failure_alert(company, consecutive_failures)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to send scrape failure alert for %s: %s", company["name"], e)

@@ -6,6 +6,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
+_match_lock = asyncio.Lock()
 _matching_active = False
 _matching_started_at: float = 0.0
 
@@ -13,15 +14,16 @@ _matching_started_at: float = 0.0
 async def run_matching():
     """Score all unmatched active jobs against the latest CV."""
     global _matching_active, _matching_started_at
-    if _matching_active:
+    if _match_lock.locked():
         logger.info("Matching already in progress — skipping")
         return
-    _matching_active = True
-    _matching_started_at = time.monotonic()
-    try:
-        await _do_matching()
-    finally:
-        _matching_active = False
+    async with _match_lock:
+        _matching_active = True
+        _matching_started_at = time.monotonic()
+        try:
+            await _do_matching()
+        finally:
+            _matching_active = False
 
 
 async def _do_matching():

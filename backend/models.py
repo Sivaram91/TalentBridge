@@ -1,7 +1,10 @@
 """Thin query helpers — no ORM, plain SQL via db.get_conn()."""
 import json
+import logging
 from typing import Optional
 from .db import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 # ── Companies ────────────────────────────────────────────────────────────────
@@ -378,7 +381,8 @@ def get_setting(key: str, default: str = "") -> str:
                 "SELECT value FROM settings WHERE key=?", (key,)
             ).fetchone()
         return row["value"] if row else default
-    except Exception:
+    except Exception as e:
+        logger.error("get_setting('%s') failed: %s", key, e)
         return default
 
 

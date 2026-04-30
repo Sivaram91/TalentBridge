@@ -59,6 +59,19 @@ def _tr(request: Request, name: str, context: dict) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name=name, context=context)
 
 
+def _safe_task(coro, name: str = "task"):
+    """Wrap a coroutine in create_task so exceptions are logged instead of silently lost."""
+    import asyncio as _asyncio
+
+    async def _run():
+        try:
+            await coro
+        except Exception as exc:
+            logger.error("Background task '%s' failed: %s", name, exc, exc_info=True)
+
+    return _asyncio.create_task(_run())
+
+
 # ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -144,7 +157,8 @@ async def cv_upload(file: UploadFile = File(...)):
                     "UPDATE cv SET keywords_json=? WHERE id=?",
                     (json.dumps(keywords), cv_row["id"])
                 )
-    except Exception:
+    except Exception as e:
+        logger.error("CV keyword extraction failed: %s", e, exc_info=True)
         keywords = []
 
     return JSONResponse({"ok": True, "keywords": keywords})
@@ -311,7 +325,7 @@ async def api_match_now():
     from .matcher import run_matching, _matching_active
     if _matching_active:
         return JSONResponse({"ok": True, "started": False, "message": "Already running"})
-    asyncio.create_task(run_matching())
+    _safe_task(run_matching(), name="matching")
     return JSONResponse({"ok": True, "started": True})
 
 
@@ -343,7 +357,7 @@ async def api_taxonomy_build():
         finally:
             _taxonomy_building = False
 
-    asyncio.create_task(_run())
+    _safe_task(_run(), name="taxonomy-build")
     return JSONResponse({"ok": True, "message": "Build started"})
 
 
@@ -520,7 +534,7 @@ async def api_scrape_now():
     import asyncio
     if _scrape_lock.locked():
         return JSONResponse({"ok": False, "message": "Scrape already in progress"}, status_code=409)
-    asyncio.create_task(run_scrape())
+    _safe_task(run_scrape(), name="scrape")
     return JSONResponse({"ok": True, "message": "Scrape started"})
 
 
@@ -555,7 +569,7 @@ async def api_fetch_descriptions():
     _scraper_mod._desc_fetch_total  = total
     _scraper_mod._desc_fetch_cancel = False
     for cid in company_ids:
-        asyncio.create_task(_fetch_all_descriptions(cid, force=True))
+        _safe_task(_fetch_all_descriptions(cid, force=True), name=f"desc-fetch-{cid}")
     # Also resolve countries for jobs that already have location but no country
     import threading
     from .main import _resolve_missing_countries
