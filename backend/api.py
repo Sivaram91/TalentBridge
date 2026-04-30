@@ -38,6 +38,12 @@ async def _lifespan(app: FastAPI):
     _ll.getLogger().setLevel(_ll.INFO)
     for noisy in ("httpx", "httpcore", "uvicorn.access"):
         _ll.getLogger(noisy).setLevel(_ll.WARNING)
+    # Tag any existing jobs that predate the tagging system
+    try:
+        from .tagger import tag_untagged_jobs
+        await asyncio.get_event_loop().run_in_executor(None, tag_untagged_jobs)
+    except Exception as e:
+        _ll.getLogger(__name__).warning("Startup tagging failed: %s", e)
     try:
         yield
     except (asyncio.CancelledError, KeyboardInterrupt):

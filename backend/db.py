@@ -35,6 +35,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE jobs ADD COLUMN country TEXT NOT NULL DEFAULT ''")
     if "posted_date" not in jobs_existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN posted_date TEXT")
+    if "level_tag" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN level_tag TEXT")
+    if "profile_tags" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN profile_tags TEXT NOT NULL DEFAULT '[]'")
+    if "location_tags" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN location_tags TEXT NOT NULL DEFAULT '[]'")
 
     cv_existing = {row[1] for row in conn.execute("PRAGMA table_info(cv)")}
     if "extra_keywords_json" not in cv_existing:

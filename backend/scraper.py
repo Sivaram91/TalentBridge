@@ -586,6 +586,13 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
 
         logger.info("Saved descriptions for %d/%d jobs (company %d)", total_saved, len(jobs_with_url), company_id)
 
+        # Re-tag jobs for this company now that descriptions are populated
+        try:
+            from .tagger import tag_untagged_jobs
+            tag_untagged_jobs()
+        except Exception as e:
+            logger.warning("Tagging after desc fetch failed for company %d: %s", company_id, e)
+
         if not _desc_fetch_cancel:
             # Resolve country for jobs that don't have one yet
             try:
@@ -674,6 +681,13 @@ async def _do_scrape():
                 mark_expired_jobs(cid, seen_titles)
 
             log_scrape(cid, len(seen_titles), "success")
+
+            # Tag any new untagged jobs immediately (title-only, description may come later)
+            try:
+                from .tagger import tag_untagged_jobs
+                tag_untagged_jobs()
+            except Exception as e:
+                logger.warning("Tagging after scrape failed for company %s: %s", company["name"], e)
 
             # Kick off description fetching in background (non-blocking)
             _safe_task(_fetch_all_descriptions(cid), name=f"desc-fetch-{cid}")

@@ -149,6 +149,17 @@
       <option value="skipped">Skipped</option>
     </select>
 
+    <!-- Matched only toggle -->
+    <button id="matched-only-btn" onclick="toggleMatchedOnly()"
+      style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;
+             background:var(--surface);color:var(--muted-fg);cursor:pointer;font-family:var(--sans);
+             white-space:nowrap;display:flex;align-items:center;gap:6px;transition:all 0.12s">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+        <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      Matched only
+    </button>
+
     <span id="shown-count" style="font-size:12px;color:var(--muted-fg);white-space:nowrap">
       {{ companies | length }} shown
     </span>
@@ -160,10 +171,9 @@
   <!-- Level chips -->
   <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
     <span style="font-size:11px;color:var(--muted-fg);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px">Level</span>
-    {% for level in ['Student Jobs','Entry','Junior','Senior','Management'] %}
+    {% for level in ['Student Jobs','Entry','Associate','Mid Level','Senior','Management','Others'] %}
     <button class="chip" data-group="level" data-value="{{ level }}" onclick="toggleChip(this)">{{ level }}</button>
     {% endfor %}
-    <button class="chip" data-group="level" data-value="__others__" onclick="toggleChip(this)">Others</button>
   </div>
 
   <!-- Profile chips -->
@@ -172,7 +182,7 @@
     {% for profile in ['Software Developer','Software Architect','Test Engineer','Systems Engineer','Product Owner','Scrum Master','Quality Engineer','Project Manager','DevOps / Cloud','Data / ML / AI'] %}
     <button class="chip" data-group="profile" data-value="{{ profile }}" onclick="toggleChip(this)">{{ profile }}</button>
     {% endfor %}
-    <button class="chip" data-group="profile" data-value="__others__" onclick="toggleChip(this)">Others</button>
+    <button class="chip" data-group="profile" data-value="Others" onclick="toggleChip(this)">Others</button>
   </div>
 
   <!-- ── Companies view ── -->
@@ -244,6 +254,22 @@
 
   <!-- ── Jobs view ── -->
   <div id="view-jobs" style="display:none">
+    <!-- Pagination bar -->
+    <div id="jobs-pagination" style="display:none;align-items:center;justify-content:space-between;padding:0 4px 10px;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:12px;color:var(--muted-fg)">Rows per page:</span>
+        <select id="page-size-select" onchange="setPageSize(+this.value)"
+          style="height:28px;border:1px solid var(--border);border-radius:5px;font-size:12px;
+                 background:var(--surface);color:var(--fg);padding:0 6px;cursor:pointer">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div id="page-info" style="font-size:12px;color:var(--muted-fg)"></div>
+      <div style="display:flex;gap:4px;align-items:center" id="page-btns"></div>
+    </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
       <table style="width:100%;border-collapse:collapse;font-size:13px" id="jobs-table">
         <thead>
@@ -251,7 +277,7 @@
             <th onclick="sortBy('title')" data-col="title" class="jobs-th">Title <span class="sort-icon"></span></th>
             <th onclick="sortBy('company')" data-col="company" class="jobs-th">Company <span class="sort-icon"></span></th>
             <th onclick="sortBy('location')" data-col="location" class="jobs-th">Location <span class="sort-icon"></span></th>
-            <th onclick="sortBy('score')" data-col="score" class="jobs-th sort-desc">Score <span class="sort-icon"></span></th>
+            <th onclick="sortBy('score')" data-col="score" class="jobs-th">Score <span class="sort-icon"></span></th>
             <th class="jobs-th">Status</th>
             <th onclick="sortBy('date')" data-col="date" class="jobs-th">Posted <span class="sort-icon"></span></th>
           </tr>
@@ -392,6 +418,7 @@ let activeLevel    = new Set();
 let activeProfile  = new Set();
 let activeCountries = new Set();
 let activeLocs     = new Set();
+let matchedOnly    = false;
 let searchResults  = null;
 let searchTimer = null;
 let searchElapsed = 0;
@@ -407,6 +434,7 @@ function switchView(view) {
 
   document.getElementById('view-companies').style.display = isJobs ? 'none' : '';
   document.getElementById('view-jobs').style.display      = isJobs ? '' : 'none';
+  if (!isJobs) document.getElementById('jobs-pagination').style.display = 'none';
   document.getElementById('status-filter').style.display  = isJobs ? 'none' : '';
   document.getElementById('score-filter').style.display   = isJobs ? '' : 'none';
   document.getElementById('decision-filter').style.display = isJobs ? '' : 'none';
@@ -457,6 +485,7 @@ function saveFilters() {
     decision: document.getElementById('decision-filter').value,
     level: [...activeLevel],
     profile: [...activeProfile],
+    matchedOnly,
   }));
 }
 
@@ -484,7 +513,27 @@ function restoreFilters() {
       activeProfile.add(v);
       document.querySelectorAll(`.chip[data-group="profile"][data-value="${v}"]`).forEach(c => c.classList.add('active'));
     });
+    if (saved.matchedOnly) { matchedOnly = true; _applyMatchedOnlyBtn(); }
   } catch(e) {}
+}
+
+function toggleMatchedOnly() {
+  matchedOnly = !matchedOnly;
+  const btn = document.getElementById('matched-only-btn');
+  btn.style.background     = matchedOnly ? 'var(--accent-bg)' : 'var(--surface)';
+  btn.style.borderColor    = matchedOnly ? 'var(--accent)'    : 'var(--border)';
+  btn.style.color          = matchedOnly ? 'var(--accent)'    : 'var(--muted-fg)';
+  btn.style.fontWeight     = matchedOnly ? '600'              : '';
+  applyFilters();
+}
+
+function _applyMatchedOnlyBtn() {
+  const btn = document.getElementById('matched-only-btn');
+  if (!btn) return;
+  btn.style.background  = matchedOnly ? 'var(--accent-bg)' : 'var(--surface)';
+  btn.style.borderColor = matchedOnly ? 'var(--accent)'    : 'var(--border)';
+  btn.style.color       = matchedOnly ? 'var(--accent)'    : 'var(--muted-fg)';
+  btn.style.fontWeight  = matchedOnly ? '600'              : '';
 }
 
 function toggleChip(btn) {
@@ -502,6 +551,7 @@ function clearFilters() {
   document.getElementById('score-filter').value = '';
   document.getElementById('decision-filter').value = '';
   activeLevel.clear(); activeProfile.clear(); activeCountries.clear(); activeLocs.clear();
+  matchedOnly = false; _applyMatchedOnlyBtn();
   updateTriggerLabel('country-trigger-label', activeCountries, 'Country…');
   updateTriggerLabel('loc-trigger-label', activeLocs, 'City…');
   updateNoLocCheckbox();
@@ -527,18 +577,33 @@ function _allJobs() {
   return jobs;
 }
 
+function _jobMatchesTags(job) {
+  if (activeLevel.size && !activeLevel.has(job.level_tag)) return false;
+  if (activeProfile.size) {
+    const tags = Array.isArray(job.profile_tags) ? job.profile_tags : [];
+    if (!tags.some(t => activeProfile.has(t))) return false;
+  }
+  return true;
+}
+
+function _filteredJobsForLocation() {
+  const hasFilter = !!(activeLevel.size || activeProfile.size);
+  return _allJobs().filter(j => !hasFilter || _jobMatchesTags(j));
+}
+
 function getAvailableCountries() {
   const s = new Set();
-  _allJobs().forEach(j => { if (j.country) s.add(j.country); });
+  _filteredJobsForLocation().forEach(j => { if (j.country) s.add(j.country); });
   return [...s].sort((a,b) => a.localeCompare(b));
 }
 
 function getAvailableCities(forCountries) {
   const s = new Set();
-  _allJobs().forEach(j => {
-    const loc = _normaliseLoc(j.location);
-    if (!loc) return;
-    if (forCountries.size === 0 || forCountries.has(j.country)) s.add(loc);
+  _filteredJobsForLocation().forEach(j => {
+    const locs = Array.isArray(j.location_tags) ? j.location_tags : [];
+    locs.forEach(loc => {
+      if (forCountries.size === 0 || forCountries.has(j.country)) s.add(loc);
+    });
   });
   return [...s].sort((a,b) => a.localeCompare(b));
 }
@@ -627,56 +692,62 @@ document.addEventListener('click', e => {
 });
 
 // ── Core filter logic ────────────────────────────────────────────────────────
-function jobMatchesFilters(job, levelKws, profileKws, levelOthers, profileOthers) {
-  const title   = job.title.toLowerCase();
-  const loc     = _normaliseLoc(job.location);
-  const country = (job.country || '').trim();
-  const noLocOk = !document.getElementById('include-no-loc').disabled && document.getElementById('include-no-loc').checked;
-  const isEmpty = loc === '' && country === '';
+function jobMatchesFilters(job) {
+  const country  = (job.country || '').trim();
+  const locTags  = Array.isArray(job.location_tags) ? job.location_tags : [];
+  const noLocOk  = !document.getElementById('include-no-loc').disabled && document.getElementById('include-no-loc').checked;
+  const isEmpty  = locTags.length === 0 && !country;
 
   if (activeCountries.size) {
     if (!((noLocOk && isEmpty) || activeCountries.has(country))) return false;
   }
   if (activeLocs.size) {
-    const locLower = loc.toLowerCase();
-    if (!((noLocOk && isEmpty) || [...activeLocs].some(v => locLower.includes(v.toLowerCase())))) return false;
+    if (!((noLocOk && isEmpty) || locTags.some(l => activeLocs.has(l)))) return false;
   }
-  if (levelKws.length || levelOthers) {
-    const matchesKnown = ALL_LEVEL_KWS.some(kw => _kwMatch(title, kw));
-    const matchesChips = levelKws.some(kw => _kwMatch(title, kw));
-    if (!matchesChips && !(levelOthers && !matchesKnown)) return false;
-  }
-  if (profileKws.length || profileOthers) {
-    const matchesKnown = titleMatchesAnyProfile(title);
-    const matchesChips = profileKws.some(kw => _kwMatch(title, kw));
-    if (!matchesChips && !(profileOthers && !matchesKnown)) return false;
-  }
+  if (!_jobMatchesTags(job)) return false;
   return true;
 }
 
-function _getFilteredJobs(card, levelKws, profileKws, levelOthers, profileOthers) {
+function _getFilteredJobs(card) {
   const cid = card.href.split('/').pop();
   let jobs = JSON.parse(card.dataset.jobs || '[]');
   if (searchResults !== null) {
     const sr = searchResults[cid];
-    if (!sr) return null; // company fully excluded by search
+    if (!sr) return null;
     const matchedIds = new Set(sr.job_ids.split(','));
     jobs = jobs.filter(j => matchedIds.has(String(j.id)));
   }
-  const chipActive = !!(activeCountries.size || activeLocs.size || activeLevel.size || activeProfile.size || levelOthers || profileOthers);
-  if (chipActive) jobs = jobs.filter(j => jobMatchesFilters(j, levelKws, profileKws, levelOthers, profileOthers));
+  const anyFilter = !!(activeCountries.size || activeLocs.size || activeLevel.size || activeProfile.size);
+  if (anyFilter) jobs = jobs.filter(j => jobMatchesFilters(j));
   return jobs;
+}
+
+function _refreshLocationDropdowns() {
+  // Prune selected countries/cities no longer available under current level/profile filters
+  const availCountries = new Set(getAvailableCountries());
+  let changed = false;
+  [...activeCountries].forEach(c => { if (!availCountries.has(c)) { activeCountries.delete(c); changed = true; } });
+  if (changed) {
+    activeLocs.clear();
+    updateTriggerLabel('country-trigger-label', activeCountries, 'Country…');
+    updateTriggerLabel('loc-trigger-label', activeLocs, 'City…');
+    updateNoLocCheckbox();
+  } else {
+    const availCities = new Set(getAvailableCities(activeCountries));
+    [...activeLocs].forEach(l => { if (!availCities.has(l)) { activeLocs.delete(l); changed = true; } });
+    if (changed) { updateTriggerLabel('loc-trigger-label', activeLocs, 'City…'); updateNoLocCheckbox(); }
+  }
+  // Rebuild open dropdown menus live
+  if (document.getElementById('country-menu').style.display !== 'none') rebuildCountryMenu();
+  if (document.getElementById('loc-menu').style.display !== 'none') rebuildLocMenu();
 }
 
 function applyFilters() {
   saveFilters();
+  _refreshLocationDropdowns();
   const st      = document.getElementById('status-filter').value;
   const searchQ = document.getElementById('search').value.trim();
-  const levelOthers   = activeLevel.has('__others__');
-  const profileOthers = activeProfile.has('__others__');
-  const levelKws   = [...activeLevel].filter(v => v !== '__others__').flatMap(v => LEVEL_KEYWORDS[v] || []);
-  const profileKws = [...activeProfile].filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
-  const filtersActive = !!(searchQ || activeCountries.size || activeLocs.size || st !== 'all' || activeLevel.size || activeProfile.size);
+  const filtersActive = !!(searchQ || activeCountries.size || activeLocs.size || st !== 'all' || activeLevel.size || activeProfile.size || matchedOnly);
   const threshold  = {{ threshold|default(50) }};
 
   const cards = document.querySelectorAll('.company-card');
@@ -685,11 +756,11 @@ function applyFilters() {
     let shownCompanies = 0, totalActive = 0, totalMatched = 0;
     cards.forEach(card => {
       const statusMatch = st === 'all' || card.dataset.status === st;
-      const jobs = _getFilteredJobs(card, levelKws, profileKws, levelOthers, profileOthers);
+      const jobs = _getFilteredJobs(card);
       if (jobs === null) { card.style.display = 'none'; return; }
       const activeCount  = jobs.length;
       const matchedCount = jobs.filter(j => j.score >= threshold).length;
-      const visible = statusMatch && (!filtersActive || activeCount > 0);
+      const visible = statusMatch && (!filtersActive || activeCount > 0) && (!matchedOnly || matchedCount > 0);
       card.style.display = visible ? '' : 'none';
       if (visible) {
         shownCompanies++;
@@ -723,9 +794,12 @@ function applyFilters() {
 
     let allJobs = [];
     cards.forEach(card => {
-      const jobs = _getFilteredJobs(card, levelKws, profileKws, levelOthers, profileOthers);
+      const jobs = _getFilteredJobs(card);
       if (jobs) allJobs = allJobs.concat(jobs);
     });
+
+    // Matched only
+    if (matchedOnly) allJobs = allJobs.filter(j => j.score >= threshold);
 
     // Score filter
     if (scoreMin === '-1') {
@@ -755,9 +829,9 @@ function applyFilters() {
       if (av < bv) return -_sortDir; if (av > bv) return _sortDir; return 0;
     });
 
-    renderJobRows(allJobs);
-    document.getElementById('shown-count').textContent = allJobs.length + ' job' + (allJobs.length !== 1 ? 's' : '');
-    document.getElementById('summary-sub').textContent = allJobs.length + ' job' + (allJobs.length !== 1 ? 's' : '') + ' shown';
+    _lastFilteredJobs = allJobs;
+    _currentPage = 1;
+    _renderPage();
   }
 
   document.getElementById('clear-btn').style.display = filtersActive ? '' : 'none';
@@ -770,15 +844,87 @@ const ALL_JOBS_MAP = {};
 
 let _sortCol = 'score';
 let _sortDir = -1;
+let _currentPage = 1;
+let _pageSize = 50;
+let _lastFilteredJobs = [];
+
+function _applySortIndicator() {
+  document.querySelectorAll('.jobs-th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === _sortCol) th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+}
 
 function sortBy(col) {
   if (_sortCol === col) _sortDir = -_sortDir;
-  else { _sortCol = col; _sortDir = col === 'score' ? -1 : 1; }
-  document.querySelectorAll('.jobs-th[data-col]').forEach(th => {
-    th.classList.remove('sort-asc','sort-desc');
-    if (th.dataset.col === col) th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
-  });
+  else { _sortCol = col; _sortDir = (col === 'score' || col === 'date') ? -1 : 1; }
+  _applySortIndicator();
   applyFilters();
+}
+
+function _renderPage() {
+  const total = _lastFilteredJobs.length;
+  const totalPages = Math.max(1, Math.ceil(total / _pageSize));
+  _currentPage = Math.min(_currentPage, totalPages);
+  const start = (_currentPage - 1) * _pageSize;
+  const pageJobs = _lastFilteredJobs.slice(start, start + _pageSize);
+
+  renderJobRows(pageJobs);
+
+  const countText = total + ' job' + (total !== 1 ? 's' : '');
+  document.getElementById('shown-count').textContent = countText;
+  document.getElementById('summary-sub').textContent = countText + ' shown';
+
+  const pag = document.getElementById('jobs-pagination');
+  if (total === 0) { pag.style.display = 'none'; return; }
+  pag.style.display = 'flex';
+
+  document.getElementById('page-info').textContent =
+    `${start + 1}–${Math.min(start + _pageSize, total)} of ${total}`;
+
+  // Build page buttons — show at most 7 buttons with ellipsis
+  const btns = document.getElementById('page-btns');
+  btns.innerHTML = '';
+  const btnStyle = (active) =>
+    `padding:4px 9px;border-radius:5px;border:1px solid ${active?'var(--accent)':'var(--border)'};
+     background:${active?'var(--accent-bg)':'var(--surface)'};color:${active?'var(--accent)':'var(--fg)'};
+     font-size:12px;cursor:pointer;font-family:var(--sans);font-weight:${active?'600':'400'}`;
+
+  const addBtn = (label, page, disabled=false) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText = disabled ? btnStyle(false) + ';opacity:0.35;cursor:default' : btnStyle(page === _currentPage);
+    if (!disabled) b.onclick = () => goToPage(page);
+    btns.appendChild(b);
+  };
+  const addEllipsis = () => {
+    const s = document.createElement('span');
+    s.textContent = '…'; s.style.cssText = 'padding:0 4px;color:var(--muted-fg);font-size:12px;align-self:center';
+    btns.appendChild(s);
+  };
+
+  addBtn('‹', _currentPage - 1, _currentPage === 1);
+  if (totalPages <= 7) {
+    for (let p = 1; p <= totalPages; p++) addBtn(p, p);
+  } else {
+    addBtn(1, 1);
+    if (_currentPage > 3) addEllipsis();
+    for (let p = Math.max(2, _currentPage - 1); p <= Math.min(totalPages - 1, _currentPage + 1); p++) addBtn(p, p);
+    if (_currentPage < totalPages - 2) addEllipsis();
+    addBtn(totalPages, totalPages);
+  }
+  addBtn('›', _currentPage + 1, _currentPage === totalPages);
+}
+
+function goToPage(page) {
+  _currentPage = page;
+  _renderPage();
+}
+
+function setPageSize(size) {
+  _pageSize = size;
+  _currentPage = 1;
+  _renderPage();
 }
 
 const DECISION_META = {
@@ -992,6 +1138,7 @@ document.getElementById('decision-modal').addEventListener('click', function(e) 
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 restoreFilters();
+_applySortIndicator();
 switchView(_currentView);  // sets toggle style + shows correct view + calls applyFilters
 
 const _savedQ = document.getElementById('search').value.trim();

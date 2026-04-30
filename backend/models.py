@@ -99,11 +99,12 @@ def search_jobs_by_keyword(query: str):
 
 
 def get_jobs_summary_by_company():
-    """Returns {company_id: [{id, title, location, country, score, url, description, reasoning, decision, decision_reason, posted_date, first_seen, company_name}, ...]} for active jobs."""
+    """Returns {company_id: [{...}, ...]} for active jobs, including tag columns."""
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT j.id, j.company_id, j.title, j.location, j.country,
                    j.url, j.description, j.posted_date, j.first_seen,
+                   j.level_tag, j.profile_tags, j.location_tags,
                    c.name AS company_name,
                    COALESCE(m.match_score, -1) AS score,
                    m.reasoning,
@@ -124,6 +125,9 @@ def get_jobs_summary_by_company():
             "title": r["title"] or "",
             "location": r["location"] or "",
             "country": r["country"] or "",
+            "level_tag": r["level_tag"] or "Others",
+            "profile_tags": json.loads(r["profile_tags"] or "[]"),
+            "location_tags": json.loads(r["location_tags"] or "[]"),
             "score": r["score"],
             "url": r["url"] or "",
             "description": r["description"] or "",
@@ -245,7 +249,7 @@ def get_all_active_jobs():
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT j.id, j.title, j.location, j.url, j.first_seen, j.posted_date,
-                   j.description,
+                   j.description, j.level_tag, j.profile_tags, j.location_tags,
                    c.id AS company_id, c.name AS company_name,
                    m.match_score, m.reasoning,
                    d.decision, d.reason AS decision_reason
