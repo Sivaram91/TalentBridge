@@ -330,6 +330,15 @@ async def alerts_save(
 
 # ── REST API ──────────────────────────────────────────────────────────────────
 
+@app.get("/api/jobs/{job_id}")
+async def api_get_job(job_id: int):
+    from .models import get_job_detail
+    job = get_job_detail(job_id)
+    if not job:
+        raise HTTPException(404)
+    return JSONResponse({"description": job["description"] or "", "reasoning": job["reasoning"] or ""})
+
+
 @app.post("/api/decisions/{job_id}")
 async def api_set_decision(
     job_id: int,

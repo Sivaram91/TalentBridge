@@ -196,11 +196,22 @@ def build_weekly_report_data(week_offset: int = 0) -> dict:
             ORDER BY d.decided_at DESC
         """, (start_iso, end_iso)).fetchall()]
 
+        expired_jobs = [dict(r) for r in conn.execute("""
+            SELECT j.title, j.url, j.location, c.name AS company_name,
+                   m.match_score
+            FROM jobs j
+            JOIN companies c ON c.id = j.company_id
+            LEFT JOIN matches m ON m.job_id = j.id
+            WHERE j.is_expired=1 AND j.expired_at >= ? AND j.expired_at <= ?
+            ORDER BY COALESCE(m.match_score,0) DESC
+        """, (start_iso, end_iso)).fetchall()]
+
     return {
         "new_jobs": new_jobs,
         "matched_jobs": matched_jobs,
         "applied_jobs": applied_jobs,
         "skipped_jobs": skipped_jobs,
+        "expired_jobs": expired_jobs,
         "week_start": week_start.strftime("%d %b").lstrip("0"),
         "week_end":   week_end.strftime("%d %b %Y").lstrip("0"),
         "week_num":   week_num,
@@ -277,7 +288,8 @@ def _render_weekly_email(data: dict) -> str:
         section("🆕 New Jobs This Week", data["new_jobs"]) +
         section("⭐ Matched Jobs (≥50%)", data["matched_jobs"]) +
         section("✅ Applied", data["applied_jobs"]) +
-        section("⏭ Skipped", data["skipped_jobs"], show_reason=True)
+        section("⏭ Skipped", data["skipped_jobs"], show_reason=True) +
+        section("🗑 Expired This Week", data["expired_jobs"])
     )
 
     stats = [
@@ -285,6 +297,7 @@ def _render_weekly_email(data: dict) -> str:
         (len(data["matched_jobs"]), "Matched", "#16a34a"),
         (len(data["applied_jobs"]), "Applied", "#0d9488"),
         (len(data["skipped_jobs"]), "Skipped", "#7a7878"),
+        (len(data["expired_jobs"]), "Expired", "#ef4444"),
     ]
     stat_cells = "".join(
         f'<td style="text-align:center;padding:0 16px"><div style="font-size:28px;font-weight:700;color:{c};font-family:monospace">{v}</div><div style="font-size:11px;color:#7a7878;margin-top:2px">{l}</div></td>'

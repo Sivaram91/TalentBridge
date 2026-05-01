@@ -38,10 +38,11 @@
       <div style="padding:28px 36px">
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;padding-bottom:24px;border-bottom:1px solid var(--border)">
           {% for label, val, color in [
-            ('New Jobs',  data.new_jobs | length,     'var(--blue)'),
-            ('Matched',   data.matched_jobs | length,  'var(--green)'),
-            ('Applied',   data.applied_jobs | length,  'var(--teal)'),
-            ('Skipped',   data.skipped_jobs | length,  'var(--muted-fg)')
+            ('New Jobs',  data.new_jobs | length,      'var(--blue)'),
+            ('Matched',   data.matched_jobs | length,   'var(--green)'),
+            ('Applied',   data.applied_jobs | length,   'var(--teal)'),
+            ('Skipped',   data.skipped_jobs | length,   'var(--muted-fg)'),
+            ('Expired',   data.expired_jobs | length,   'var(--red, #ef4444)')
           ] %}
           <div style="text-align:center">
             <div style="font-size:28px;font-weight:700;color:{{ color }};font-family:var(--mono)">{{ val }}</div>
@@ -89,8 +90,9 @@
         {{ job_section("⭐ Matched Jobs (≥50%)", data.matched_jobs) }}
         {{ job_section("✅ Applied", data.applied_jobs) }}
         {{ job_section("⏭ Skipped", data.skipped_jobs, show_reason=true) }}
+        {{ job_section("🗑 Expired This Week", data.expired_jobs) }}
 
-        {% if not data.new_jobs and not data.matched_jobs %}
+        {% if not data.new_jobs and not data.matched_jobs and not data.expired_jobs %}
         <div style="text-align:center;padding:24px 0;color:var(--muted-fg);font-size:14px">
           No activity this week yet. Check back after the next scrape.
         </div>

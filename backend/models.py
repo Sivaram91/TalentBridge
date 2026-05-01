@@ -178,7 +178,8 @@ def upsert_company(name: str, url: str, fetch: str = "http", method: str = "css"
 def get_jobs_for_company(company_id: int):
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT j.*,
+            SELECT j.id, j.title, j.url, j.location, j.country, j.first_seen,
+                   j.posted_date, j.is_expired, j.level_tag, j.profile_tags, j.location_tags,
                    m.match_score, m.reasoning, m.is_override, m.override_value,
                    d.decision, d.reason AS decision_reason, d.decided_at
             FROM jobs j
@@ -188,6 +189,17 @@ def get_jobs_for_company(company_id: int):
             ORDER BY j.is_expired ASC, COALESCE(m.match_score,0) DESC
         """, (company_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_job_detail(job_id: int):
+    with get_conn() as conn:
+        row = conn.execute("""
+            SELECT j.description, m.reasoning
+            FROM jobs j
+            LEFT JOIN matches m ON m.job_id = j.id
+            WHERE j.id = ?
+        """, (job_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def upsert_job(company_id: int, title: str, description: str,
@@ -237,7 +249,7 @@ def mark_expired_jobs(company_id: int, seen_titles: list[str]):
         if prev_count > 0 and len(seen_titles) < prev_count * 0.30:
             return
         conn.execute("""
-            UPDATE jobs SET is_expired=1
+            UPDATE jobs SET is_expired=1, expired_at=datetime('now')
             WHERE company_id=? AND is_expired=0
               AND title NOT IN ({})
         """.format(",".join("?" * len(seen_titles))),

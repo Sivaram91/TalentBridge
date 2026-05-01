@@ -41,6 +41,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE jobs ADD COLUMN profile_tags TEXT NOT NULL DEFAULT '[]'")
     if "location_tags" not in jobs_existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN location_tags TEXT NOT NULL DEFAULT '[]'")
+    if "expired_at" not in jobs_existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN expired_at TEXT")
 
     cv_existing = {row[1] for row in conn.execute("PRAGMA table_info(cv)")}
     if "extra_keywords_json" not in cv_existing:

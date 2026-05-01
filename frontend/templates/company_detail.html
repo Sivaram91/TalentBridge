@@ -61,10 +61,10 @@
 
   <!-- Filter tabs -->
   <div class="filter-tabs">
-    <a href="?filter=all"      class="filter-tab {% if not request.query_params.get('filter') or request.query_params.get('filter')=='all' %}active{% endif %}">All <span class="tab-count">{{ active_jobs|length }}</span></a>
-    <a href="?filter=matched"  class="filter-tab {% if request.query_params.get('filter')=='matched' %}active{% endif %}">Matched <span class="tab-count">{{ matched_jobs|length }}</span></a>
-    <a href="?filter=unmatched" class="filter-tab {% if request.query_params.get('filter')=='unmatched' %}active{% endif %}">Unmatched <span class="tab-count">{{ active_jobs|length - matched_jobs|length }}</span></a>
-    <a href="?filter=expired"  class="filter-tab {% if request.query_params.get('filter')=='expired' %}active{% endif %}">Expired <span class="tab-count">{{ expired_jobs|length }}</span></a>
+    <button onclick="setFilter('all')"       class="filter-tab" id="tab-all">All <span class="tab-count">{{ active_jobs|length }}</span></button>
+    <button onclick="setFilter('matched')"   class="filter-tab" id="tab-matched">Matched <span class="tab-count">{{ matched_jobs|length }}</span></button>
+    <button onclick="setFilter('unmatched')" class="filter-tab" id="tab-unmatched">Unmatched <span class="tab-count">{{ active_jobs|length - matched_jobs|length }}</span></button>
+    <button onclick="setFilter('expired')"   class="filter-tab" id="tab-expired">Expired <span class="tab-count">{{ expired_jobs|length }}</span></button>
   </div>
 
   <!-- Pagination controls (top) -->
@@ -86,24 +86,17 @@
 
   <!-- Job list -->
   <div id="job-list" style="display:flex;flex-direction:column;gap:4px">
-    {% set f = request.query_params.get('filter', 'all') %}
     {% for job in jobs | sort(attribute='is_expired') | sort(attribute='match_score', reverse=True) %}
-      {% set show = (
-        (f == 'all'       and job.is_expired == 0) or
-        (f == 'matched'   and job.is_expired == 0 and (job.match_score or 0) >= threshold) or
-        (f == 'unmatched' and job.is_expired == 0 and (job.match_score or 0) < threshold) or
-        (f == 'expired'   and job.is_expired == 1)
-      ) %}
-      {% if show %}
       <div class="job-row {% if job.is_expired %}job-expired{% endif %}" id="job-{{ job.id }}"
            data-title="{{ job.title | e }}"
            data-location="{{ job.location or '' | e }}"
            data-country="{{ job.country or '' | e }}"
-           data-description="{{ job.description or '' | e }}"
            data-score="{{ job.match_score if job.match_score is not none else '' }}"
-           data-reasoning="{{ job.reasoning or '' | e }}"
            data-url="{{ job.url or '' | e }}"
-           style="cursor:pointer" onclick="openJobPanel({{ job.id }})">
+           data-expired="{{ job.is_expired }}"
+           data-decision="{{ job.decision or '' }}"
+           style="cursor:pointer" onclick="openJobPanel({{ job.id }})"
+           data-visible="1">
         <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0">
           {{ score_badge(job.match_score) }}
           <div style="flex:1;min-width:0">
@@ -126,10 +119,6 @@
                 {% endif %}
               {% endif %}
             </div>
-            {% if job.reasoning %}
-              {% set r = job.reasoning %}
-              <p class="job-reasoning" style="font-size:12px;color:var(--muted-fg);margin:0;line-height:1.5" data-raw="{{ r | e }}"></p>
-            {% endif %}
             {% if job.decision == 'skipped' and job.decision_reason %}
               <p style="font-size:11px;color:var(--muted-fg);margin:3px 0 0;font-style:italic">Reason: {{ job.decision_reason }}</p>
             {% endif %}
@@ -137,7 +126,6 @@
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0" onclick="event.stopPropagation()">
-          <!-- Decision inline editor -->
           <div class="decision-view-{{ job.id }}">
             <button onclick="openDecision({{ job.id }}, '{{ job.decision or '' }}', '{{ job.decision_reason or '' }}')"
                     class="btn-ghost" style="font-size:11px">
@@ -152,7 +140,6 @@
           {% endif %}
         </div>
       </div>
-      {% endif %}
     {% endfor %}
   </div>
 
@@ -263,55 +250,41 @@
 
 {% block extra_scripts %}
 <script>
-// ── Global filter application ────────────────────────────────────────────────
-const FILTER_KEY = 'tb_filters';
-// LEVEL_KEYWORDS, PROFILE_KEYWORDS, ALL_LEVEL_KWS, ALL_PROFILE_KWS defined in base.html
+const FILTER_KEY   = 'tb_filters';
+const PAGE_SIZE_KEY = 'tb_page_size';
+const THRESHOLD    = {{ threshold }};
 
-function jobMatchesGlobalFilters(title, location, country, filters) {
-  const t           = title.toLowerCase();
-  const loc         = (location || '').trim();
-  const ctry        = (country || '').trim();
-  const noLocOk     = !!filters.includeNoLoc;
-  const isEmpty     = loc === '' && ctry === '';
-  const selectedCountries = filters.countries || [];
-  const selectedLocs      = (filters.locs || []).filter(v => v !== '');
+let _activeFilter = 'all';
+let _currentPage  = 1;
+let _pageSize     = parseInt(localStorage.getItem(PAGE_SIZE_KEY) || '10', 10);
 
-  if (selectedCountries.length) {
-    const match = (noLocOk && isEmpty) || selectedCountries.includes(ctry);
-    if (!match) return false;
-  }
-  if (selectedLocs.length) {
-    const locLower = loc.toLowerCase();
-    const match = (noLocOk && isEmpty) ||
-      selectedLocs.some(v => locLower.includes(v.toLowerCase()));
-    if (!match) return false;
-  }
-  const levelVals     = filters.level   || [];
-  const profileVals   = filters.profile || [];
-  const levelOthers   = levelVals.includes('__others__');
-  const profileOthers = profileVals.includes('__others__');
-  const levelKws      = levelVals.filter(v => v !== '__others__').flatMap(v => LEVEL_KEYWORDS[v] || []);
-  const profileKws    = profileVals.filter(v => v !== '__others__').flatMap(v => PROFILE_KEYWORDS[v] || []);
+// ── Tab filter ───────────────────────────────────────────────────────────────
+function setFilter(f) {
+  _activeFilter = f;
+  _currentPage  = 1;
+  ['all','matched','unmatched','expired'].forEach(id => {
+    document.getElementById('tab-' + id)?.classList.toggle('active', id === f);
+  });
+  renderPage();
+}
 
-  if (levelKws.length || levelOthers) {
-    const knownMatch = levelKws.some(kw => _kwMatch(t, kw));
-    const isOther    = !ALL_LEVEL_KWS.some(kw => _kwMatch(t, kw));
-    if (!knownMatch && !(levelOthers && isOther)) return false;
-  }
-  if (profileKws.length || profileOthers) {
-    const knownMatch = profileKws.some(kw => _kwMatch(t, kw));
-    const isOther    = !titleMatchesAnyProfile(t);
-    if (!knownMatch && !(profileOthers && isOther)) return false;
-  }
+function _rowMatchesTab(row) {
+  const expired = row.dataset.expired === '1';
+  const score   = row.dataset.score === '' ? -1 : parseInt(row.dataset.score);
+  if (_activeFilter === 'all')       return !expired;
+  if (_activeFilter === 'matched')   return !expired && score >= THRESHOLD;
+  if (_activeFilter === 'unmatched') return !expired && score < THRESHOLD;
+  if (_activeFilter === 'expired')   return expired;
   return true;
 }
 
-function applyGlobalFilters() {
+// ── Global chip/search filters (carried over from companies page) ─────────────
+function _rowMatchesGlobalFilters(row) {
   let filters, searchRes;
   try { filters   = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch(e) {}
   try { searchRes = JSON.parse(localStorage.getItem('tb_search_results') || 'null'); } catch(e) {}
 
-  const companyId = String(window.location.pathname.split('/').pop());
+  const companyId    = String(window.location.pathname.split('/').pop());
   const hasCountries = (filters?.countries || []).length > 0;
   const hasLocs      = (filters?.locs || []).filter(v => v !== '').length > 0;
   const hasLevel     = (filters?.level   || []).length > 0;
@@ -319,82 +292,47 @@ function applyGlobalFilters() {
   const savedSearch  = (filters?.search || '').trim();
   const hasSearch    = searchRes !== null && savedSearch.length > 0;
   const hasChips     = hasCountries || hasLocs || hasLevel || hasProfile;
+  if (!hasSearch && !hasChips) return true;
 
-  if (!hasSearch && !hasChips) return;
+  const jobId  = (row.id || '').replace('job-', '');
+  const title  = row.dataset.title || '';
+  const loc    = row.dataset.location || '';
+  const ctry   = row.dataset.country || '';
 
-  // Build allowed job ID set from search results for this company
-  let allowedIds = null;
   if (hasSearch) {
     const sr = searchRes[companyId];
-    if (!sr) {
-      // No jobs for this company matched the search — hide everything
-      allowedIds = new Set();
-    } else {
-      allowedIds = new Set(sr.job_ids.split(','));
+    const allowed = sr ? new Set(sr.job_ids.split(',')) : new Set();
+    if (!allowed.has(jobId)) return false;
+  }
+  if (hasChips) {
+    const t         = title.toLowerCase();
+    const noLocOk   = !!filters.includeNoLoc;
+    const isEmpty   = loc.trim() === '' && ctry.trim() === '';
+    if (hasCountries) {
+      if (!((noLocOk && isEmpty) || (filters.countries || []).includes(ctry))) return false;
+    }
+    if (hasLocs) {
+      const locLower = loc.toLowerCase();
+      const locs     = (filters.locs || []).filter(v => v !== '');
+      if (!((noLocOk && isEmpty) || locs.some(v => locLower.includes(v.toLowerCase())))) return false;
     }
   }
-
-  let hiddenCount = 0;
-  document.querySelectorAll('.job-row').forEach(row => {
-    const jobId = (row.id || '').replace('job-', '');
-    const title   = row.dataset.title || '';
-    const loc     = row.dataset.location || '';
-    const country = row.dataset.country || '';
-
-    const searchOk = allowedIds === null || allowedIds.has(jobId);
-    const chipOk   = !hasChips || jobMatchesGlobalFilters(title, loc, country, filters);
-
-    if (!searchOk || !chipOk) {
-      row.dataset.filterHidden = '1';
-      row.style.display = 'none';
-      hiddenCount++;
-    } else {
-      row.dataset.filterHidden = '0';
-      row.style.display = '';
-    }
-  });
-
-  if (hiddenCount > 0) {
-    const filters_desc = [
-      hasSearch    ? `"${savedSearch}"` : '',
-      hasCountries ? (filters.countries || []).join('/') : '',
-      hasLocs      ? (filters.locs || []).filter(v => v).join('/') : '',
-    ].filter(Boolean).join(', ');
-    const banner = document.createElement('div');
-    banner.id = 'filter-notice';
-    banner.style.cssText = 'margin-bottom:12px;padding:8px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:6px;font-size:12px;color:var(--accent);display:flex;align-items:center;justify-content:space-between';
-    banner.innerHTML = `<span>Filters active — ${hiddenCount} job${hiddenCount>1?'s':''} hidden. <a href="/companies" style="color:var(--accent);font-weight:600">← Back to search</a></span>`;
-    const jobList = document.querySelector('.job-row')?.parentElement;
-    if (jobList) jobList.insertBefore(banner, jobList.firstChild);
-  }
+  return true;
 }
 
 // ── Pagination ───────────────────────────────────────────────────────────────
-const PAGE_SIZE_KEY = 'tb_page_size';
-let _currentPage = 1;
-let _pageSize    = parseInt(localStorage.getItem(PAGE_SIZE_KEY) || '10', 10);
-
-function _filterVisibleRows() {
-  return [...document.querySelectorAll('#job-list .job-row')].filter(r => r.dataset.filterHidden !== '1');
-}
-
 function renderPage() {
-  const rows     = _filterVisibleRows();
-  const total    = rows.length;
-  const pages    = Math.max(1, Math.ceil(total / _pageSize));
-  _currentPage   = Math.min(_currentPage, pages);
-  const start    = (_currentPage - 1) * _pageSize;
-  const end      = start + _pageSize;
+  const allRows = [...document.querySelectorAll('#job-list .job-row')];
+  const visible = allRows.filter(r => _rowMatchesTab(r) && _rowMatchesGlobalFilters(r));
+  const total   = visible.length;
+  const pages   = Math.max(1, Math.ceil(total / _pageSize));
+  _currentPage  = Math.min(_currentPage, pages);
+  const start   = (_currentPage - 1) * _pageSize;
+  const end     = start + _pageSize;
 
-  rows.forEach((r, i) => {
-    if (i >= start && i < end) {
-      r.style.display = '';
-      r.dataset.pgHidden = '0';
-    } else {
-      r.style.display = 'none';
-      r.dataset.pgHidden = '1';
-    }
-  });
+  // Hide all, then show current page slice
+  allRows.forEach(r => r.style.display = 'none');
+  visible.forEach((r, i) => { r.style.display = (i >= start && i < end) ? '' : 'none'; });
 
   const info = total === 0 ? 'No jobs' : `${start + 1}–${Math.min(end, total)} of ${total}`;
   ['top','bot'].forEach(pos => {
@@ -405,8 +343,6 @@ function renderPage() {
     if (prev)   prev.disabled = _currentPage <= 1;
     if (next)   next.disabled = _currentPage >= pages;
   });
-
-  // Hide bottom bar if only one page
   const botBar = document.getElementById('pagination-bar-bot');
   if (botBar) botBar.style.display = pages <= 1 ? 'none' : '';
   const topBar = document.getElementById('pagination-bar-top');
@@ -427,18 +363,6 @@ function changePageSize() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  applyGlobalFilters();
-  // Render compact reasoning summaries on job rows
-  document.querySelectorAll('.job-reasoning').forEach(el => {
-    const raw = el.dataset.raw || '';
-    let detail = null;
-    try { detail = JSON.parse(raw); } catch(e) {}
-    if (detail?.score_note) {
-      el.textContent = detail.score_note;
-    } else if (raw && !detail) {
-      el.textContent = raw;
-    }
-  });
   // Restore saved page size
   const sel = document.getElementById('page-size-sel');
   if (sel) {
@@ -446,7 +370,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
     _pageSize = parseInt(sel.value, 10);
   }
-  renderPage();
+  // Show filter-active banner if global filters are in effect
+  let filters, searchRes;
+  try { filters   = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch(e) {}
+  try { searchRes = JSON.parse(localStorage.getItem('tb_search_results') || 'null'); } catch(e) {}
+  const hasAny = (filters?.countries||[]).length || (filters?.locs||[]).filter(v=>v).length ||
+                 (filters?.level||[]).length || (filters?.profile||[]).length ||
+                 (searchRes !== null && (filters?.search||'').trim().length);
+  if (hasAny) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'margin-bottom:12px;padding:8px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:6px;font-size:12px;color:var(--accent)';
+    banner.innerHTML = `Filters active from Companies page. <a href="/companies" style="color:var(--accent);font-weight:600">← Back to clear</a>`;
+    document.getElementById('job-list')?.before(banner);
+  }
+  setFilter('all');
 });
 
 // ── Description formatter ─────────────────────────────────────────────────────
@@ -513,94 +450,44 @@ function formatDescription(raw) {
 
 // ── Job description side panel ───────────────────────────────────────────────
 let _panelJobId = null;
+const _jobCache = {};  // jobId -> { description, reasoning }
 
-function openJobPanel(jobId) {
-  const row = document.getElementById('job-' + jobId);
-  if (!row) return;
-  _panelJobId = jobId;
-
-  const title    = row.dataset.title || '';
-  const location = row.dataset.location || '';
-  const desc     = row.dataset.description || '';
-  const score    = row.dataset.score;
-  const reasoning= row.dataset.reasoning || '';
-  const url      = row.dataset.url || '';
-
-  document.getElementById('panel-title').textContent = title;
-  document.getElementById('panel-location').textContent = location;
-
-  // Score badge
-  const scoreEl = document.getElementById('panel-score');
-  if (score !== '') {
-    const s = parseInt(score);
-    const cls = s >= 70 ? 'badge-green' : s >= 50 ? 'badge-amber' : 'badge-muted';
-    scoreEl.className = 'badge-score ' + cls;
-    scoreEl.textContent = s + '%';
-    scoreEl.style.display = '';
-  } else {
-    scoreEl.style.display = 'none';
-  }
-
-  // Match breakdown
+function _renderPanelContent(desc, reasoning) {
   const breakdownEl = document.getElementById('panel-match-breakdown');
   let detail = null;
   try { detail = reasoning ? JSON.parse(reasoning) : null; } catch(e) {}
-  const hasBase   = detail?.matched_base?.length > 0;
-  const hasExpert = detail?.matched_expert?.length > 0;
-  const hasMissing= detail?.missing?.length > 0;
+  const hasBase    = detail?.matched_base?.length > 0;
+  const hasExpert  = detail?.matched_expert?.length > 0;
+  const hasMissing = detail?.missing?.length > 0;
   if (detail && (hasBase || hasExpert || hasMissing)) {
     let html = '';
     if (hasBase) {
-      html += `<div style="margin-bottom:8px">
-        <span style="font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:0.05em">
-          ✓ Base skills matched
-        </span>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
-      detail.matched_base.forEach(kw => {
-        html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;
-                              background:var(--green-bg);color:var(--green);font-family:var(--mono)">${_esc(kw)}</span>`;
-      });
+      html += `<div style="margin-bottom:8px"><span style="font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:0.05em">✓ Base skills matched</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.matched_base.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:var(--green-bg);color:var(--green);font-family:var(--mono)">${_esc(kw)}</span>`; });
       html += `</div></div>`;
     }
     if (hasExpert) {
-      html += `<div style="margin-bottom:8px">
-        <span style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em">
-          ✓ Expert skills matched
-        </span>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
-      detail.matched_expert.forEach(kw => {
-        html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;
-                              background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">${_esc(kw)}</span>`;
-      });
+      html += `<div style="margin-bottom:8px"><span style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em">✓ Expert skills matched</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.matched_expert.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">${_esc(kw)}</span>`; });
       html += `</div></div>`;
     }
     if (!hasBase && detail?.has_base) {
-      html += `<div style="margin-bottom:8px;font-size:11px;color:var(--amber)">
-        ⚠ None of your base skills found in this job description</div>`;
+      html += `<div style="margin-bottom:8px;font-size:11px;color:var(--amber)">⚠ None of your base skills found in this job description</div>`;
     }
     if (hasMissing) {
-      html += `<div>
-        <span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:0.05em">
-          ✗ In job but not in your CV
-        </span>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
-      detail.missing.forEach(kw => {
-        html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;
-                              background:var(--red-bg);color:var(--red);font-family:var(--mono)">${_esc(kw)}</span>`;
-      });
+      html += `<div><span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:0.05em">✗ In job but not in your CV</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">`;
+      detail.missing.forEach(kw => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;background:var(--red-bg);color:var(--red);font-family:var(--mono)">${_esc(kw)}</span>`; });
       html += `</div></div>`;
     }
     breakdownEl.innerHTML = html;
     breakdownEl.style.display = '';
   } else if (reasoning && !detail) {
-    // Legacy plain-text reasoning
     breakdownEl.innerHTML = `<span style="font-size:12px;color:var(--accent)">🔍 ${_esc(reasoning)}</span>`;
     breakdownEl.style.display = '';
   } else {
     breakdownEl.style.display = 'none';
   }
 
-  // Description
   if (desc) {
     document.getElementById('panel-desc').innerHTML = formatDescription(desc);
     document.getElementById('panel-desc').style.display = '';
@@ -609,21 +496,63 @@ function openJobPanel(jobId) {
     document.getElementById('panel-desc').style.display = 'none';
     document.getElementById('panel-no-desc').style.display = '';
   }
+}
 
-  // Link
+async function openJobPanel(jobId) {
+  const row = document.getElementById('job-' + jobId);
+  if (!row) return;
+  _panelJobId = jobId;
+
+  const title    = row.dataset.title || '';
+  const location = row.dataset.location || '';
+  const score    = row.dataset.score;
+  const url      = row.dataset.url || '';
+
+  document.getElementById('panel-title').textContent = title;
+  document.getElementById('panel-location').textContent = location;
+
+  const scoreEl = document.getElementById('panel-score');
+  if (score !== '') {
+    const s = parseInt(score);
+    scoreEl.className = 'badge-score ' + (s >= 70 ? 'badge-green' : s >= 50 ? 'badge-amber' : 'badge-muted');
+    scoreEl.textContent = s + '%';
+    scoreEl.style.display = '';
+  } else {
+    scoreEl.style.display = 'none';
+  }
+
   const linkEl = document.getElementById('panel-link');
   if (url) { linkEl.href = url; linkEl.style.display = ''; }
   else { linkEl.style.display = 'none'; }
 
-  // Decision button label
   const decisionBtns = document.querySelectorAll(`.decision-view-${jobId} button`);
   const hasDecision = decisionBtns.length && decisionBtns[0].textContent.trim() === 'Override';
   document.getElementById('panel-decision-btn').textContent = hasDecision ? 'Override decision' : 'Set decision';
 
+  // Open panel immediately, show loading state for description
   document.getElementById('job-panel-overlay').style.display = '';
   const panel = document.getElementById('job-panel');
   panel.style.display = 'flex';
   requestAnimationFrame(() => panel.style.transform = 'translateX(0)');
+
+  document.getElementById('panel-match-breakdown').style.display = 'none';
+  document.getElementById('panel-desc').innerHTML = '<span style="color:var(--muted-fg);font-size:13px">Loading…</span>';
+  document.getElementById('panel-desc').style.display = '';
+  document.getElementById('panel-no-desc').style.display = 'none';
+
+  // Fetch description lazily, cache to avoid re-fetching
+  if (!_jobCache[jobId]) {
+    try {
+      const data = await fetch(`/api/jobs/${jobId}`).then(r => r.json());
+      _jobCache[jobId] = data;
+    } catch(e) {
+      _jobCache[jobId] = { description: '', reasoning: '' };
+    }
+  }
+  // Only render if panel is still showing this job (user may have closed it)
+  if (_panelJobId === jobId) {
+    _renderPanelContent(_jobCache[jobId].description, _jobCache[jobId].reasoning);
+  }
 }
 
 function closeJobPanel() {
