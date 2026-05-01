@@ -49,7 +49,7 @@ def _parse_llm_json(raw: str) -> list[str]:
 
 async def _extract_skills_llm(description: str) -> list[str]:
     import asyncio
-    from .gemini import _call_ai, GeminiRateLimitError
+    from .llm import _call_ai, LLMRateLimitError
     prompt = _EXTRACT_PROMPT.format(desc=description[:8000])
     for attempt in range(5):
         try:
@@ -57,7 +57,7 @@ async def _extract_skills_llm(description: str) -> list[str]:
             skills = _parse_llm_json(raw)
             logger.info("Taxonomy LLM: extracted %d skills", len(skills))
             return skills
-        except GeminiRateLimitError as e:
+        except LLMRateLimitError as e:
             wait = e.retry_after + 5
             logger.info("Taxonomy LLM: rate limited, waiting %ds (attempt %d/5)…", wait, attempt + 1)
             await asyncio.sleep(wait)
@@ -218,13 +218,13 @@ def _parse_cluster_response(raw: str) -> list[dict]:
 
 async def _cluster_batch(batch: list[str]) -> list[dict]:
     import asyncio
-    from .gemini import _call_ai, GeminiRateLimitError
+    from .llm import _call_ai, LLMRateLimitError
     prompt = _CLUSTER_PROMPT.format(skills=json.dumps(batch, ensure_ascii=False))
     for attempt in range(5):
         try:
             raw = await _call_ai(prompt, temperature=0.0)
             return _parse_cluster_response(raw)
-        except GeminiRateLimitError as e:
+        except LLMRateLimitError as e:
             wait = e.retry_after + 5
             logger.info("Clustering: rate limited, waiting %ds (attempt %d/5)…", wait, attempt + 1)
             await asyncio.sleep(wait)

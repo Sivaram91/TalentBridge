@@ -173,7 +173,7 @@ async def cv_upload(file: UploadFile = File(...)):
     save_cv(raw_text, [])
 
     try:
-        from .gemini import extract_cv_keywords
+        from .llm import extract_cv_keywords
         keywords = await extract_cv_keywords(raw_text)
         with get_conn() as conn:
             cv_row = conn.execute(

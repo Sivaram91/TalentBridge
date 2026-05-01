@@ -629,7 +629,7 @@ async def run_scrape():
 
 async def _do_scrape():
     from .models import get_all_companies, upsert_job, mark_expired_jobs, log_scrape, get_setting
-    from .gemini import GeminiRateLimitError
+    from .llm import LLMRateLimitError
 
     logger.info("Daily scrape started at %s", datetime.now().isoformat())
 
@@ -693,9 +693,9 @@ async def _do_scrape():
             _safe_task(_fetch_all_descriptions(cid), name=f"desc-fetch-{cid}")
             logger.info("Scraped %d jobs from %s", len(seen_titles), company["name"])
 
-        except GeminiRateLimitError as e:
+        except LLMRateLimitError as e:
             wait = e.retry_after or 60
-            logger.warning("Gemini rate limit hit for %s — waiting %ds", company["name"], wait)
+            logger.warning("Groq rate limit hit for %s — waiting %ds", company["name"], wait)
             log_scrape(cid, 0, "rate_limited")
             await asyncio.sleep(wait)
             queue.insert(0, company)  # retry immediately after wait
