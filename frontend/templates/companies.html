@@ -581,7 +581,9 @@ function _jobMatchesTags(job) {
   if (activeLevel.size && !activeLevel.has(job.level_tag)) return false;
   if (activeProfile.size) {
     const tags = Array.isArray(job.profile_tags) ? job.profile_tags : [];
-    if (!tags.some(t => activeProfile.has(t))) return false;
+    const othersSelected = activeProfile.has('Others');
+    const isOthers = tags.length === 0;
+    if (!tags.some(t => activeProfile.has(t)) && !(othersSelected && isOthers)) return false;
   }
   return true;
 }

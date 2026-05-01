@@ -298,7 +298,7 @@ def get_clusters() -> list[dict]:
     from .db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT name, skills_json, domain_tags_json, skill_count FROM skill_clusters ORDER BY skill_count DESC"
+            "SELECT name, skills_json, domain_tags_json, skill_count FROM skill_clusters ORDER BY CASE WHEN name='Other' THEN 1 ELSE 0 END, skill_count DESC"
         ).fetchall()
     result = []
     for r in rows:

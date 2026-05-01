@@ -8,7 +8,11 @@
     <div>
       <h1 class="screen-title">
         Weekly Report
+        {% if data.week_offset == 0 %}
         <span style="font-size:12px;font-weight:600;color:var(--green);background:var(--green-bg);padding:2px 8px;border-radius:99px;margin-left:10px;vertical-align:middle">current</span>
+        {% else %}
+        <span style="font-size:12px;font-weight:600;color:var(--muted-fg);background:var(--surface-2);padding:2px 8px;border-radius:99px;margin-left:10px;vertical-align:middle">CW{{ '%02d'|format(data.week_num) }} {{ data.week_year }}</span>
+        {% endif %}
       </h1>
       <p class="screen-sub">{{ data.week_start }} – {{ data.week_end }}</p>
     </div>
@@ -25,7 +29,7 @@
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
       <!-- Email header -->
       <div style="background:var(--fg);padding:32px 36px">
-        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:8px">Weekly Digest</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:8px">Weekly Digest · CW{{ '%02d'|format(data.week_num) }} {{ data.week_year }}</div>
         <div style="font-size:22px;font-weight:700;color:white">TalentBridge Report</div>
         <div style="font-size:13px;color:rgba(255,255,255,0.55);margin-top:4px">{{ data.week_start }} – {{ data.week_end }}</div>
       </div>

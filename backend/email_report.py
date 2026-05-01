@@ -131,12 +131,30 @@ def _render_daily_email(jobs: list[dict]) -> str:
 
 # ── Weekly report ────────────────────────────────────────────────────────────
 
-def build_weekly_report_data() -> dict:
+def _iso_week_bounds(week_offset: int = 0) -> tuple[datetime, datetime, int, int]:
+    """Return (start, end, iso_week, iso_year) for the calendar week at the given offset.
+
+    offset=0 → current ISO week (Mon–Sun), offset=1 → previous week, etc.
+    """
+    today = datetime.now(timezone.utc).date()
+    # Monday of the current ISO week
+    monday = today - timedelta(days=today.weekday())
+    monday -= timedelta(weeks=week_offset)
+    sunday = monday + timedelta(days=6)
+    iso = monday.isocalendar()
+    start = datetime(monday.year, monday.month, monday.day, tzinfo=timezone.utc)
+    end   = datetime(sunday.year, sunday.month, sunday.day, 23, 59, 59, tzinfo=timezone.utc)
+    return start, end, iso[1], iso[0]  # start, end, week_num, year
+
+
+def build_weekly_report_data(week_offset: int = 0) -> dict:
     from .db import get_conn
     from .models import get_setting
 
     threshold = int(get_setting("match_threshold", "50"))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    week_start, week_end, week_num, week_year = _iso_week_bounds(week_offset)
+    start_iso = week_start.isoformat()
+    end_iso   = week_end.isoformat()
 
     with get_conn() as conn:
         new_jobs = [dict(r) for r in conn.execute("""
@@ -145,19 +163,18 @@ def build_weekly_report_data() -> dict:
             FROM jobs j
             JOIN companies c ON c.id = j.company_id
             LEFT JOIN matches m ON m.job_id = j.id
-            WHERE j.is_expired = 0 AND j.first_seen >= ?
+            WHERE j.first_seen >= ? AND j.first_seen <= ?
             ORDER BY COALESCE(m.match_score,0) DESC
-            LIMIT 50
-        """, (cutoff,)).fetchall()]
+        """, (start_iso, end_iso)).fetchall()]
 
         matched_jobs = [dict(r) for r in conn.execute("""
             SELECT j.title, j.url, c.name AS company_name, m.match_score, m.reasoning
             FROM jobs j
             JOIN companies c ON c.id = j.company_id
             JOIN matches m ON m.job_id = j.id
-            WHERE j.is_expired = 0 AND m.match_score >= ? AND j.first_seen >= ?
+            WHERE j.first_seen >= ? AND j.first_seen <= ? AND m.match_score >= ?
             ORDER BY m.match_score DESC
-        """, (threshold, cutoff)).fetchall()]
+        """, (start_iso, end_iso, threshold)).fetchall()]
 
         applied_jobs = [dict(r) for r in conn.execute("""
             SELECT j.title, j.url, c.name AS company_name, m.match_score
@@ -165,9 +182,9 @@ def build_weekly_report_data() -> dict:
             JOIN jobs j ON j.id = d.job_id
             JOIN companies c ON c.id = j.company_id
             LEFT JOIN matches m ON m.job_id = j.id
-            WHERE d.decision = 'applied' AND d.decided_at >= ?
+            WHERE d.decision = 'applied' AND d.decided_at >= ? AND d.decided_at <= ?
             ORDER BY d.decided_at DESC
-        """, (cutoff,)).fetchall()]
+        """, (start_iso, end_iso)).fetchall()]
 
         skipped_jobs = [dict(r) for r in conn.execute("""
             SELECT j.title, j.url, c.name AS company_name, m.match_score, d.reason AS decision_reason
@@ -175,18 +192,62 @@ def build_weekly_report_data() -> dict:
             JOIN jobs j ON j.id = d.job_id
             JOIN companies c ON c.id = j.company_id
             LEFT JOIN matches m ON m.job_id = j.id
-            WHERE d.decision = 'skipped' AND d.decided_at >= ?
+            WHERE d.decision = 'skipped' AND d.decided_at >= ? AND d.decided_at <= ?
             ORDER BY d.decided_at DESC
-        """, (cutoff,)).fetchall()]
+        """, (start_iso, end_iso)).fetchall()]
 
     return {
         "new_jobs": new_jobs,
         "matched_jobs": matched_jobs,
         "applied_jobs": applied_jobs,
         "skipped_jobs": skipped_jobs,
-        "week_start": (datetime.now() - timedelta(days=7)).strftime("%d %b").lstrip("0"),
-        "week_end": datetime.now().strftime("%d %b %Y").lstrip("0"),
+        "week_start": week_start.strftime("%d %b").lstrip("0"),
+        "week_end":   week_end.strftime("%d %b %Y").lstrip("0"),
+        "week_num":   week_num,
+        "week_year":  week_year,
+        "week_offset": week_offset,
     }
+
+
+def get_available_weeks() -> list[dict]:
+    """Return list of ISO weeks that have any job activity, newest first."""
+    from .db import get_conn
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT strftime('%Y', first_seen) AS yr,
+                            strftime('%W', first_seen) AS wk
+            FROM jobs
+            WHERE first_seen IS NOT NULL
+            ORDER BY yr DESC, wk DESC
+            LIMIT 52
+        """).fetchall()
+    today = datetime.now(timezone.utc).date()
+    monday = today - timedelta(days=today.weekday())
+    result = []
+    for r in rows:
+        try:
+            # Reconstruct a date from year+week to compute offset
+            yr, wk = int(r["yr"]), int(r["wk"])
+            # ISO week: use %G-%V-%u for Monday
+            row_monday = datetime.strptime(f"{yr}-{wk:02d}-1", "%Y-%W-%w").date()
+            offset = (monday - row_monday).days // 7
+            iso = row_monday.isocalendar()
+            result.append({
+                "offset": offset,
+                "week_num": iso[1],
+                "week_year": iso[0],
+                "label": f"CW{iso[1]:02d} {iso[0]}",
+            })
+        except Exception:
+            continue
+    # Deduplicate by offset (strftime %W can collide near year boundaries)
+    seen = set()
+    deduped = []
+    for r in result:
+        if r["offset"] not in seen:
+            seen.add(r["offset"])
+            deduped.append(r)
+    return deduped
 
 
 def send_weekly_report():

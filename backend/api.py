@@ -270,13 +270,19 @@ async def tracker_page(request: Request):
 # ── Weekly Report ─────────────────────────────────────────────────────────────
 
 @app.get("/report", response_class=HTMLResponse)
-async def report_page(request: Request):
+async def report_page(request: Request, week: int = 0):
     from .email_report import build_weekly_report_data
-    data = build_weekly_report_data()
+    data = build_weekly_report_data(week_offset=week)
     return _tr(request, "report.html", {
         "data": data,
         "active_nav": "report",
     })
+
+
+@app.get("/api/report/weeks")
+async def report_weeks():
+    from .email_report import get_available_weeks
+    return {"weeks": get_available_weeks()}
 
 
 @app.post("/report/send")

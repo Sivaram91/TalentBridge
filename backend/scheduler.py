@@ -13,10 +13,19 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def _run_async(coro):
-    """Run an async coroutine from a sync (scheduler thread) context."""
+    """Run an async coroutine from a sync (scheduler thread) context.
+    Drains all remaining tasks before closing so background tasks
+    (e.g. _fetch_all_descriptions) are not abandoned mid-flight.
+    """
     loop = asyncio.new_event_loop()
+    # Suppress ResourceWarning noise from unclosed pipe transports on Windows
+    loop.set_exception_handler(lambda l, ctx: None if 'exception' not in ctx else logger.debug("Async exception: %s", ctx.get('message', '')))
     try:
         loop.run_until_complete(coro)
+        # Drain any background tasks spawned during the coroutine
+        pending = asyncio.all_tasks(loop)
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
     finally:
         loop.close()
 
