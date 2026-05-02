@@ -219,3 +219,93 @@ Example: {{"score": 72, "reasoning": "Strong Python and ML overlap; cloud experi
     except Exception as e:
         logger.error("Job scoring failed for '%s': %s", job_title, e)
         return {"score": 0, "reasoning": "Scoring unavailable."}
+
+
+# ── Company section format learning (one-time per company) ───────────────────
+
+async def learn_company_section_format(raw_description: str, company_name: str) -> dict:
+    """Ask LLM to identify section header patterns in a company's job description format.
+    Called once per company; result cached in DB.
+    Returns a dict with keys: responsibilities_headers, qualifications_headers, skills_headers.
+    Returns {} on failure (caller falls back to generic heuristics).
+    """
+    prompt = f"""This is a job description from {company_name}.
+Identify the exact section header lines that separate:
+1. Responsibilities / tasks / what the person will do
+2. Qualifications / requirements / candidate profile
+3. Skills / technical requirements (if separate from qualifications)
+
+Return ONLY a JSON object:
+{{
+  "responsibilities_headers": ["exact header text as it appears", ...],
+  "qualifications_headers": ["exact header text as it appears", ...],
+  "skills_headers": ["exact header text as it appears", ...]
+}}
+
+List exact header text (max 3 per category). If a category has no clear header, use [].
+
+DESCRIPTION:
+{raw_description[:1500]}"""
+
+    try:
+        raw = await _call_ai(prompt, temperature=0.0)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        return {
+            "responsibilities_headers": result.get("responsibilities_headers", []),
+            "qualifications_headers":   result.get("qualifications_headers", []),
+            "skills_headers":           result.get("skills_headers", []),
+        }
+    except LLMRateLimitError:
+        raise
+    except Exception as e:
+        logger.warning("Section format learning failed for '%s': %s", company_name, e)
+        return {}
+
+
+# ── Per-job structured extraction ────────────────────────────────────────────
+
+async def structure_job_description(role_text: str, qualif_text: str) -> dict | None:
+    """Extract structured bullet points and skills from pre-split description sections.
+    Returns dict with role_description, qualifications, skills_must, skills_nice.
+    Returns None on failure.
+    """
+    prompt = f"""Extract structured data from these two job description sections.
+
+RESPONSIBILITIES SECTION:
+{role_text[:400]}
+
+QUALIFICATIONS SECTION:
+{qualif_text[:400]}
+
+Return ONLY a JSON object with exactly these keys:
+- "role_description": array of 4-5 concise strings (what the person will do, each starting with a verb)
+- "qualifications": array of 4-5 concise strings (non-technical requirements: degree, years of experience, domain knowledge)
+- "skills_must": array of strings (technical skills, tools, languages explicitly required)
+- "skills_nice": array of strings (technical skills listed as nice-to-have, preferred, or advantageous)
+
+Rules: no soft skills in skills arrays; no invented information; use [] if a section is empty."""
+
+    try:
+        raw = await _call_ai(prompt, temperature=0.0)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        return {
+            "role_description": [str(s) for s in result.get("role_description", [])[:5]],
+            "qualifications":   [str(s) for s in result.get("qualifications", [])[:5]],
+            "skills_must":      [str(s) for s in result.get("skills_must", [])],
+            "skills_nice":      [str(s) for s in result.get("skills_nice", [])],
+        }
+    except LLMRateLimitError:
+        raise
+    except Exception as e:
+        logger.error("Job structuring failed: %s", e)
+        return None

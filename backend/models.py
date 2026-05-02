@@ -194,12 +194,36 @@ def get_jobs_for_company(company_id: int):
 def get_job_detail(job_id: int):
     with get_conn() as conn:
         row = conn.execute("""
-            SELECT j.description, m.reasoning
+            SELECT j.description, j.structured_description, m.reasoning
             FROM jobs j
             LEFT JOIN matches m ON m.job_id = j.id
             WHERE j.id = ?
         """, (job_id,)).fetchone()
     return dict(row) if row else None
+
+
+def get_company_section_format(company_id: int) -> dict | None:
+    """Returns parsed section_format JSON for a company, or None if not set."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT section_format FROM companies WHERE id=?", (company_id,)
+        ).fetchone()
+    if not row or not row["section_format"]:
+        return None
+    import json
+    try:
+        return json.loads(row["section_format"])
+    except Exception:
+        return None
+
+
+def save_company_section_format(company_id: int, fmt: dict) -> None:
+    import json
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE companies SET section_format=? WHERE id=?",
+            (json.dumps(fmt), company_id)
+        )
 
 
 def upsert_job(company_id: int, title: str, description: str,

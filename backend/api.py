@@ -333,10 +333,21 @@ async def alerts_save(
 @app.get("/api/jobs/{job_id}")
 async def api_get_job(job_id: int):
     from .models import get_job_detail
+    import json as _json
     job = get_job_detail(job_id)
     if not job:
         raise HTTPException(404)
-    return JSONResponse({"description": job["description"] or "", "reasoning": job["reasoning"] or ""})
+    structured = None
+    if job.get("structured_description"):
+        try:
+            structured = _json.loads(job["structured_description"])
+        except Exception:
+            pass
+    return JSONResponse({
+        "description": job["description"] or "",
+        "reasoning":   job["reasoning"] or "",
+        "structured":  structured,
+    })
 
 
 @app.post("/api/decisions/{job_id}")
@@ -609,6 +620,33 @@ async def api_fetch_descriptions():
     return JSONResponse({"ok": True, "message": f"Fetching descriptions for {len(company_ids)} companies"})
 
 
+@app.post("/api/descriptions/structure")
+async def api_structure_descriptions():
+    """Backfill structured_description for all jobs that have a description but no structure yet."""
+    import json as _json
+    from .description_parser import parse_job_description, parsed_to_dict
+    with get_conn() as conn:
+        jobs = conn.execute("""
+            SELECT j.id, j.company_id, j.title, j.location, j.description,
+                   c.name AS company_name
+            FROM jobs j
+            JOIN companies c ON c.id = j.company_id
+            WHERE j.description IS NOT NULL AND j.description != ''
+              AND j.structured_description IS NULL
+        """).fetchall()
+        done = 0
+        for row in jobs:
+            parsed = parse_job_description(row["company_id"], row["description"])
+            if parsed is not None:
+                d = parsed_to_dict(parsed, row["title"] or "", row["company_name"])
+                conn.execute(
+                    "UPDATE jobs SET structured_description=? WHERE id=?",
+                    (_json.dumps(d), row["id"])
+                )
+                done += 1
+    return JSONResponse({"ok": True, "message": f"Structured {done}/{len(jobs)} jobs"})
+
+
 @app.get("/api/descriptions/status")
 async def api_descriptions_status():
     import backend.scraper as _scraper_mod
@@ -684,3 +722,120 @@ async def api_status():
         "matching": matching,
         "matching_elapsed": int(now - _matching_started_at) if matching else 0,
     })
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    return _tr(request, "admin.html", {"active_nav": "admin"})
+
+
+@app.get("/api/admin/health")
+async def api_admin_health():
+    """Per-company health stats for the admin dashboard."""
+    import json as _json
+    with get_conn() as conn:
+        companies = conn.execute("SELECT id, name FROM companies ORDER BY name").fetchall()
+        result = []
+        for c in companies:
+            cid = c["id"]
+            total = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id=?", (cid,)).fetchone()[0]
+            with_desc = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE company_id=? AND description IS NOT NULL AND description != ''",
+                (cid,)
+            ).fetchone()[0]
+            with_struct = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE company_id=? AND structured_description IS NOT NULL",
+                (cid,)
+            ).fetchone()[0]
+            parse_failures: dict[str, int] = {}
+            invalid_count = 0
+            struct_rows = conn.execute(
+                "SELECT structured_description FROM jobs WHERE company_id=? AND structured_description IS NOT NULL",
+                (cid,)
+            ).fetchall()
+            for row in struct_rows:
+                try:
+                    d = _json.loads(row["structured_description"])
+                    if not d.get("parse_valid", True):
+                        invalid_count += 1
+                        for m in d.get("parse_missing", []):
+                            parse_failures[m] = parse_failures.get(m, 0) + 1
+                except Exception:
+                    pass
+            result.append({
+                "id": cid,
+                "name": c["name"],
+                "total_jobs": total,
+                "desc_fetched": with_desc,
+                "desc_missing": total - with_desc,
+                "structured": with_struct,
+                "structured_valid": with_struct - invalid_count,
+                "structured_invalid": invalid_count,
+                "unstructured": with_desc - with_struct,
+                "parse_failures": parse_failures,
+            })
+    return JSONResponse(result)
+
+
+@app.get("/api/admin/jobs")
+async def api_admin_jobs(company_id: int, filter: str):
+    """Return job list for a specific company + filter for admin drill-down.
+
+    filter values: total | no_desc | structured | valid | invalid | unstructured
+    """
+    import json as _json
+    with get_conn() as conn:
+        if filter == "total":
+            rows = conn.execute(
+                "SELECT id, title, location, url FROM jobs WHERE company_id=? ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+        elif filter == "no_desc":
+            rows = conn.execute(
+                "SELECT id, title, location, url FROM jobs WHERE company_id=? AND (description IS NULL OR description='') ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+        elif filter == "structured":
+            rows = conn.execute(
+                "SELECT id, title, location, url FROM jobs WHERE company_id=? AND structured_description IS NOT NULL ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+        elif filter == "with_desc":
+            rows = conn.execute(
+                "SELECT id, title, location, url FROM jobs WHERE company_id=? AND description IS NOT NULL AND description!='' ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+            return JSONResponse([{"id": r["id"], "title": r["title"] or "", "location": r["location"] or "", "url": r["url"] or ""} for r in rows])
+        elif filter == "valid":
+            all_struct = conn.execute(
+                "SELECT id, title, location, url, structured_description FROM jobs WHERE company_id=? AND structured_description IS NOT NULL ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+            result = []
+            for r in all_struct:
+                if _json.loads(r["structured_description"] or "{}").get("parse_valid", False):
+                    result.append({"id": r["id"], "title": r["title"] or "", "location": r["location"] or "", "url": r["url"] or ""})
+            return JSONResponse(result)
+        elif filter == "invalid":
+            all_struct = conn.execute(
+                "SELECT id, title, location, url, structured_description FROM jobs WHERE company_id=? AND structured_description IS NOT NULL ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+            result = []
+            for r in all_struct:
+                d = _json.loads(r["structured_description"] or "{}")
+                if not d.get("parse_valid", True):
+                    result.append({"id": r["id"], "title": r["title"] or "", "location": r["location"] or "", "url": r["url"] or "", "missing": d.get("parse_missing", [])})
+            return JSONResponse(result)
+        elif filter == "unstructured":
+            rows = conn.execute(
+                "SELECT id, title, location, url FROM jobs WHERE company_id=? AND description IS NOT NULL AND description!='' AND structured_description IS NULL ORDER BY first_seen DESC",
+                (company_id,)
+            ).fetchall()
+        else:
+            return JSONResponse({"error": "unknown filter"}, status_code=400)
+
+        result = []
+        for r in rows:
+            result.append({"id": r["id"], "title": r["title"] or "", "location": r["location"] or "", "url": r["url"] or ""})
+    return JSONResponse(result)

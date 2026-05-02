@@ -41,6 +41,12 @@
       <button class="btn-outline" onclick="cancelFetch()" id="cancel-fetch-btn" style="display:none;color:var(--red);border-color:var(--red)">
         ✕ Cancel
       </button>
+      <button class="btn-outline" onclick="triggerStructureDescriptions()" id="structure-desc-btn" title="Extract structured info (role, skills, qualifications) from fetched descriptions">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Structure
+      </button>
       <button class="btn-outline" onclick="triggerScrape()" id="scrape-btn">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
           <path d="M13 8A5 5 0 112.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -1176,6 +1182,14 @@ async function triggerFetchDescriptions() {
     showToast(data.message || (data.ok ? 'Fetching started.' : 'Already in progress.'));
   } catch(e) { showToast('Failed to start fetch.'); }
   startStatusPolling();
+}
+
+async function triggerStructureDescriptions() {
+  try {
+    const data = await (await fetch('/api/descriptions/structure', {method:'POST'})).json();
+    if (data.ok) { tbLog('Structuring descriptions started…','info'); }
+    showToast(data.message || (data.ok ? 'Structuring started.' : 'Failed.'));
+  } catch(e) { showToast('Failed to start structuring.'); }
 }
 
 async function triggerScrape() {

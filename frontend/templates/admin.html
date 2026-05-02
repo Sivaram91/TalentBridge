@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %} — Admin{% endblock %}
+{% block breadcrumb %}Admin{% endblock %}
+
+{% block content %}
+<div class="screen-content">
+  <div class="screen-header">
+    <div>
+      <div class="screen-title">Admin Dashboard</div>
+      <div class="screen-sub">Company health — scraping, description fetch, and parsing status</div>
+    </div>
+    <button class="btn-outline" onclick="reload()" id="refresh-btn">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <path d="M13.5 8A5.5 5.5 0 113.1 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M3 2v3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+
+  <div id="health-grid" style="display:flex;flex-direction:column;gap:16px">
+    <div style="color:var(--muted-fg);font-size:13px">Loading…</div>
+  </div>
+
+  <!-- Drill-down panel -->
+  <div id="drill-panel" style="display:none;margin-top:24px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+        <span id="drill-title" style="font-size:13px;font-weight:600;color:var(--fg)"></span>
+        <span id="drill-count" style="font-size:11px;color:var(--muted-fg);font-family:var(--mono)"></span>
+        <button onclick="closeDrill()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted-fg);font-size:16px;line-height:1;padding:2px 6px" title="Close">&times;</button>
+      </div>
+      <div id="drill-body" style="max-height:420px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+.health-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.health-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.health-company-name { font-size: 15px; font-weight: 600; color: var(--fg); }
+.health-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0;
+}
+.health-stat {
+  padding: 14px 18px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.health-stat:last-child { border-right: none; }
+.health-stat:hover { background: var(--surface-2); }
+.health-stat.active { background: var(--accent-bg); }
+.health-stat-val {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--mono);
+  line-height: 1;
+}
+.health-stat-label {
+  font-size: 11px;
+  color: var(--muted-fg);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.health-stat:hover .health-stat-label { color: var(--fg); }
+.drill-hint {
+  font-size: 10px;
+  color: var(--accent);
+  margin-top: 3px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.health-stat:hover .drill-hint { opacity: 1; }
+.health-bar-row { padding: 12px 18px; border-top: 1px solid var(--border); }
+.health-bar-track {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  overflow: hidden;
+  display: flex;
+}
+.health-bar-seg { height: 100%; transition: width 0.4s ease; }
+.health-failures {
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.failure-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--mono);
+  background: var(--red-bg);
+  color: var(--red);
+}
+.drill-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  transition: background 0.1s;
+}
+.drill-row:last-child { border-bottom: none; }
+.drill-row:hover { background: var(--surface-2); }
+.drill-row-id { font-family: var(--mono); font-size: 11px; color: var(--muted-fg); flex-shrink: 0; }
+.drill-row-title { flex: 1; color: var(--fg); font-weight: 500; }
+.drill-row-loc { font-size: 11px; color: var(--muted-fg); flex-shrink: 0; }
+.drill-row-link { font-size: 11px; color: var(--accent); text-decoration: none; flex-shrink: 0; }
+.drill-row-link:hover { text-decoration: underline; }
+.drill-missing { font-size: 10px; font-family: var(--mono); color: var(--red); flex-shrink: 0; }
+</style>
+
+<script>
+let _activeStatEl = null;
+
+async function reload() {
+  closeDrill();
+  const grid = document.getElementById('health-grid');
+  grid.innerHTML = '<div style="color:var(--muted-fg);font-size:13px">Loading…</div>';
+  try {
+    const data = await (await fetch('/api/admin/health')).json();
+    grid.innerHTML = '';
+    if (!data.length) {
+      grid.innerHTML = '<div style="color:var(--muted-fg);font-size:13px">No companies found.</div>';
+      return;
+    }
+    for (const c of data) grid.appendChild(buildCard(c));
+  } catch(e) {
+    grid.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load health data.</div>';
+  }
+}
+
+function pct(n, total) { return total > 0 ? Math.round(n / total * 100) : 0; }
+
+async function drillDown(el, companyId, companyName, filter, label) {
+  // Toggle off if same stat clicked again
+  if (_activeStatEl === el) { closeDrill(); return; }
+  if (_activeStatEl) _activeStatEl.classList.remove('active');
+  _activeStatEl = el;
+  el.classList.add('active');
+
+  const panel = document.getElementById('drill-panel');
+  const body  = document.getElementById('drill-body');
+  const title = document.getElementById('drill-title');
+  const count = document.getElementById('drill-count');
+
+  panel.style.display = '';
+  title.textContent = `${companyName} — ${label}`;
+  count.textContent = '';
+  body.innerHTML = '<div style="padding:16px 18px;color:var(--muted-fg);font-size:13px">Loading…</div>';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const jobs = await (await fetch(`/api/admin/jobs?company_id=${companyId}&filter=${filter}`)).json();
+    count.textContent = `${jobs.length} jobs`;
+    if (!jobs.length) {
+      body.innerHTML = '<div style="padding:16px 18px;color:var(--muted-fg);font-size:13px">No jobs in this category.</div>';
+      return;
+    }
+    body.innerHTML = '';
+    for (const j of jobs) {
+      const row = document.createElement('div');
+      row.className = 'drill-row';
+      const missing = j.missing && j.missing.length
+        ? `<span class="drill-missing">${j.missing.join(', ')}</span>` : '';
+      row.innerHTML = `
+        <span class="drill-row-id">#${j.id}</span>
+        <span class="drill-row-title">${_esc(j.title)}</span>
+        ${j.location ? `<span class="drill-row-loc">${_esc(j.location)}</span>` : ''}
+        ${missing}
+        ${j.url ? `<a class="drill-row-link" href="${j.url}" target="_blank" rel="noreferrer">↗ View</a>` : ''}`;
+      body.appendChild(row);
+    }
+  } catch(e) {
+    body.innerHTML = '<div style="padding:16px 18px;color:var(--red);font-size:13px">Failed to load jobs.</div>';
+  }
+}
+
+function closeDrill() {
+  document.getElementById('drill-panel').style.display = 'none';
+  if (_activeStatEl) { _activeStatEl.classList.remove('active'); _activeStatEl = null; }
+}
+
+function _esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function buildCard(c) {
+  const card = document.createElement('div');
+  card.className = 'health-card';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'health-card-header';
+  const initials = c.name.split(/\s+/).map(w => w[0]).join('').slice(0,3).toUpperCase();
+  header.innerHTML = `
+    <div class="company-logo" style="width:36px;height:36px;font-size:12px">${initials}</div>
+    <div>
+      <div class="health-company-name">${c.name}</div>
+      <div style="font-size:11px;color:var(--muted-fg)">Company ID ${c.id}</div>
+    </div>`;
+  card.appendChild(header);
+
+  // Stats row
+  const stats = document.createElement('div');
+  stats.className = 'health-stats';
+  const descPct  = pct(c.desc_fetched, c.total_jobs);
+  const structPct = pct(c.structured, c.total_jobs);
+  const validPct  = pct(c.structured_valid, c.total_jobs);
+
+  const statItems = [
+    { val: c.total_jobs,        pct: null,      label: 'Total Jobs',           color: 'var(--fg)',      filter: 'total' },
+    { val: c.desc_fetched,      pct: descPct,   label: 'Descriptions Fetched', color: c.desc_missing > 0 ? 'var(--amber)' : 'var(--green)', filter: 'with_desc' },
+    { val: c.desc_missing,      pct: null,      label: 'No Description',       color: c.desc_missing > 0 ? 'var(--amber)' : 'var(--muted-fg)', filter: 'no_desc' },
+    { val: c.structured_valid,  pct: validPct,  label: 'Parse Valid',          color: 'var(--green)',   filter: 'valid' },
+    { val: c.structured_invalid,pct: null,      label: 'Parse Invalid',        color: c.structured_invalid > 0 ? 'var(--red)' : 'var(--muted-fg)', filter: 'invalid' },
+    { val: c.unstructured,      pct: null,      label: 'Unstructured',         color: c.unstructured > 0 ? 'var(--amber)' : 'var(--muted-fg)', filter: 'unstructured' },
+  ];
+
+  for (const s of statItems) {
+    const el = document.createElement('div');
+    el.className = 'health-stat';
+    const pctHtml = s.pct !== null
+      ? ` <span style="font-size:13px;font-weight:400;color:var(--muted-fg)">(${s.pct}%)</span>` : '';
+    el.innerHTML = `
+      <div class="health-stat-val" style="color:${s.color}">${s.val}${pctHtml}</div>
+      <div class="health-stat-label">${s.label}</div>
+      <div class="drill-hint">click to view jobs</div>`;
+    el.addEventListener('click', () => drillDown(el, c.id, c.name, s.filter, s.label));
+    stats.appendChild(el);
+  }
+  card.appendChild(stats);
+
+  // Progress bar
+  const barRow = document.createElement('div');
+  barRow.className = 'health-bar-row';
+  const noDesc   = c.total_jobs - c.desc_fetched;
+  const noStruct = c.desc_fetched - c.structured;
+  barRow.innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted-fg);margin-bottom:5px">
+      <span>Coverage breakdown</span><span>${c.total_jobs} total</span>
+    </div>
+    <div class="health-bar-track">
+      <div class="health-bar-seg" style="width:${pct(c.structured_valid,c.total_jobs)}%;background:var(--green)"></div>
+      <div class="health-bar-seg" style="width:${pct(c.structured_invalid,c.total_jobs)}%;background:var(--amber)"></div>
+      <div class="health-bar-seg" style="width:${pct(noStruct,c.total_jobs)}%;background:var(--blue);opacity:0.4"></div>
+      <div class="health-bar-seg" style="width:${pct(noDesc,c.total_jobs)}%;background:var(--border)"></div>
+    </div>
+    <div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
+      <span style="font-size:10px;color:var(--green);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span>Valid parse</span>
+      <span style="font-size:10px;color:var(--amber);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--amber);display:inline-block"></span>Invalid parse</span>
+      <span style="font-size:10px;color:var(--muted-fg);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--blue);opacity:0.5;display:inline-block"></span>Has desc, not structured</span>
+      <span style="font-size:10px;color:var(--muted-fg);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--border);display:inline-block"></span>No description</span>
+    </div>`;
+  card.appendChild(barRow);
+
+  // Parse failure chips
+  const failures = Object.entries(c.parse_failures || {});
+  if (failures.length) {
+    const failRow = document.createElement('div');
+    failRow.className = 'health-failures';
+    failRow.innerHTML = `<span style="font-size:11px;color:var(--muted-fg);margin-right:4px">Missing sections:</span>` +
+      failures.sort((a,b) => b[1]-a[1]).map(([k,v]) =>
+        `<span class="failure-chip">${k} &times;${v}</span>`
+      ).join('');
+    card.appendChild(failRow);
+  }
+
+  return card;
+}
+
+reload();
+</script>
+{% endblock %}

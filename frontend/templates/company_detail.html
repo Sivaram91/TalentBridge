@@ -452,7 +452,69 @@ function formatDescription(raw) {
 let _panelJobId = null;
 const _jobCache = {};  // jobId -> { description, reasoning }
 
-function _renderPanelContent(desc, reasoning) {
+function _langBadge(code) {
+  const map = {
+    german_must:  { text: '🇩🇪 German required',     color: 'var(--fg)',       bg: 'var(--surface-2)' },
+    english_must: { text: '🇬🇧 English required',    color: 'var(--fg)',       bg: 'var(--surface-2)' },
+    both_must:    { text: '🇩🇪🇬🇧 DE + EN required', color: 'var(--fg)',       bg: 'var(--surface-2)' },
+    german_nice:  { text: '🇩🇪 German preferred',    color: 'var(--muted-fg)', bg: 'var(--surface-2)' },
+    english_nice: { text: '🇬🇧 English preferred',   color: 'var(--muted-fg)', bg: 'var(--surface-2)' },
+  };
+  const m = map[code];
+  if (!m) return '';
+  return `<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${m.bg};color:${m.color};font-weight:500">${m.text}</span>`;
+}
+
+function _renderStructured(s) {
+  let html = '';
+  // Meta row: location, salary, language
+  const meta = [
+    s.location ? `<span style="font-size:12px;color:var(--muted-fg)">📍 ${_esc(s.location)}</span>` : '',
+    s.salary   ? `<span style="font-size:12px;color:var(--muted-fg)">💰 ${_esc(s.salary)}</span>`   : '',
+    s.language_required ? _langBadge(s.language_required) : '',
+  ].filter(Boolean).join('<span style="color:var(--border);margin:0 4px">·</span>');
+  if (meta) html += `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:14px">${meta}</div>`;
+
+  // Role description
+  if (s.role_description?.length) {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">What you'll do</div>
+      <ul style="margin:0;padding:0 0 0 16px;list-style:disc">`;
+    s.role_description.forEach(b => { html += `<li style="font-size:13px;color:var(--fg);margin-bottom:3px;line-height:1.5">${_esc(b)}</li>`; });
+    html += `</ul></div>`;
+  }
+
+  // Qualifications
+  if (s.qualifications?.length) {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">What we're looking for</div>
+      <ul style="margin:0;padding:0 0 0 16px;list-style:disc">`;
+    s.qualifications.forEach(b => { html += `<li style="font-size:13px;color:var(--fg);margin-bottom:3px;line-height:1.5">${_esc(b)}</li>`; });
+    html += `</ul></div>`;
+  }
+
+  // Must-have skills
+  if (s.skills_must?.length) {
+    html += `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Must-have skills</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">`;
+    s.skills_must.forEach(k => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">${_esc(k)}</span>`; });
+    html += `</div></div>`;
+  }
+
+  // Nice-to-have skills
+  if (s.skills_nice?.length) {
+    html += `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted-fg);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Nice-to-have skills</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">`;
+    s.skills_nice.forEach(k => { html += `<span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;background:var(--surface-2);color:var(--muted-fg);font-family:var(--mono)">${_esc(k)}</span>`; });
+    html += `</div></div>`;
+  }
+
+  return html;
+}
+
+function _renderPanelContent(desc, reasoning, structured) {
   const breakdownEl = document.getElementById('panel-match-breakdown');
   let detail = null;
   try { detail = reasoning ? JSON.parse(reasoning) : null; } catch(e) {}
@@ -488,7 +550,11 @@ function _renderPanelContent(desc, reasoning) {
     breakdownEl.style.display = 'none';
   }
 
-  if (desc) {
+  if (structured) {
+    document.getElementById('panel-desc').innerHTML = _renderStructured(structured);
+    document.getElementById('panel-desc').style.display = '';
+    document.getElementById('panel-no-desc').style.display = 'none';
+  } else if (desc) {
     document.getElementById('panel-desc').innerHTML = formatDescription(desc);
     document.getElementById('panel-desc').style.display = '';
     document.getElementById('panel-no-desc').style.display = 'none';
@@ -551,7 +617,8 @@ async function openJobPanel(jobId) {
   }
   // Only render if panel is still showing this job (user may have closed it)
   if (_panelJobId === jobId) {
-    _renderPanelContent(_jobCache[jobId].description, _jobCache[jobId].reasoning);
+    const cached = _jobCache[jobId];
+    _renderPanelContent(cached.description, cached.reasoning, cached.structured || null);
   }
 }
 

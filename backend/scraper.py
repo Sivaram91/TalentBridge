@@ -462,7 +462,7 @@ async def _fetch_job_description(url: str) -> str:
         if html:
             text = _extract_body_text(html)
             if len(text) >= 200:
-                return text[:3000]
+                return text
 
         # Only try Playwright for JS-rendered sites
         if not _is_js_required(url):
@@ -472,7 +472,7 @@ async def _fetch_job_description(url: str) -> str:
             html = await _fetch_js(url)
             if html:
                 text = _extract_body_text(html)
-                return text[:3000]
+                return text
         except Exception as e:
             logger.debug("Playwright desc fetch failed %s: %s", url, e)
 
@@ -523,7 +523,13 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                 return_exceptions=True
             )
             from .geo import extract_location_from_description, resolve_country
+            # Track jobs that got fresh descriptions for structuring below
+            structured_candidates = []  # list of (job_id, title, final_loc, desc)
             with get_conn() as conn:
+                company_row = conn.execute(
+                    "SELECT name FROM companies WHERE id=?", (company_id,)
+                ).fetchone()
+                company_name = company_row["name"] if company_row else ""
                 for job, desc in zip(batch, results):
                     if isinstance(desc, Exception):
                         logger.warning("Description fetch error for job %s (%s): %s", job["id"], job["url"], desc)
@@ -567,12 +573,12 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
 
                         if final_country is not None:
                             conn.execute(
-                                "UPDATE jobs SET description=?, location=?, country=?, posted_date=? WHERE id=?",
+                                "UPDATE jobs SET description=?, location=?, country=?, posted_date=?, location_tags=NULL WHERE id=?",
                                 (desc, final_loc, final_country, posted_date, job["id"])
                             )
                         elif final_loc != existing_loc:
                             conn.execute(
-                                "UPDATE jobs SET description=?, location=?, posted_date=? WHERE id=?",
+                                "UPDATE jobs SET description=?, location=?, posted_date=?, location_tags=NULL WHERE id=?",
                                 (desc, final_loc, posted_date, job["id"])
                             )
                         else:
@@ -581,8 +587,23 @@ async def _fetch_all_descriptions(company_id: int, force: bool = False):
                                 (desc, posted_date, job["id"])
                             )
                         total_saved += 1
+                        structured_candidates.append((job["id"], stored["title"] or "", final_loc, desc))
                     # Cap at total to avoid counter exceeding 100%
                     _desc_fetch_done = min(_desc_fetch_done + 1, _desc_fetch_total)
+
+            # Deterministic structuring (no LLM)
+            if structured_candidates:
+                from .description_parser import parse_job_description, parsed_to_dict
+                from .db import get_conn as _get_conn
+                with _get_conn() as conn:
+                    for job_id, title, final_loc, desc in structured_candidates:
+                        parsed = parse_job_description(company_id, desc)
+                        if parsed is not None:
+                            d = parsed_to_dict(parsed, title, company_name)
+                            conn.execute(
+                                "UPDATE jobs SET structured_description=? WHERE id=?",
+                                (json.dumps(d), job_id)
+                            )
 
         logger.info("Saved descriptions for %d/%d jobs (company %d)", total_saved, len(jobs_with_url), company_id)
 
@@ -629,7 +650,6 @@ async def run_scrape():
 
 async def _do_scrape():
     from .models import get_all_companies, upsert_job, mark_expired_jobs, log_scrape, get_setting
-    from .llm import LLMRateLimitError
 
     logger.info("Daily scrape started at %s", datetime.now().isoformat())
 
@@ -692,13 +712,6 @@ async def _do_scrape():
             # Kick off description fetching in background (non-blocking)
             _safe_task(_fetch_all_descriptions(cid), name=f"desc-fetch-{cid}")
             logger.info("Scraped %d jobs from %s", len(seen_titles), company["name"])
-
-        except LLMRateLimitError as e:
-            wait = e.retry_after or 60
-            logger.warning("Groq rate limit hit for %s — waiting %ds", company["name"], wait)
-            log_scrape(cid, 0, "rate_limited")
-            await asyncio.sleep(wait)
-            queue.insert(0, company)  # retry immediately after wait
 
         except Exception as e:
             logger.exception("Unexpected error scraping %s: %s", company["name"], e)
